@@ -42,11 +42,44 @@ From the weight-over-time data, you can derive:
 
 ## Usage
 
+### Step 1: Extract frames from video
 ```bash
-# Extract frames from video (1 fps)
+# Extract frames at 1 fps
 ./extract_frames.sh
+```
 
-# Process frames to extract weight readings
+### Step 2: Process frames and analyze
+
+Using the Click CLI tool:
+
+```bash
+# Process frames with OpenAI Vision API and analyze results
+./uroflow.py read
+
+# Or process with custom output files
+./uroflow.py read --output-csv my_data.csv --output-json my_data.json
+```
+
+### Step 3: Re-analyze existing data
+
+```bash
+# Analyze previously extracted CSV data
+./uroflow.py analyze
+
+# Or analyze a specific CSV file
+./uroflow.py analyze --csv-file my_data.csv
+```
+
+### CLI Commands
+
+- `uroflow read` - Processes frame images, extracts weights via OCR, and runs analysis
+- `uroflow analyze` - Analyzes existing CSV data without re-processing frames
+- `uroflow --help` - Show help and available commands
+
+### Legacy script
+
+The original script is still available:
+```bash
 python main.py
 ```
 
