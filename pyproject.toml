@@ -1,17 +1,21 @@
 [project]
-name = "weight-extractor"
+name = "uroflow"
 version = "0.1.0"
-description = "Extract weight readings from scale video frames using OpenAI Vision API"
+description = "DIY Uroflowmetry Analysis Tool - Extract flow metrics from scale video frames"
 authors = [
     {name = "Assaf Lavie",email = "a@assaf.io"}
 ]
 readme = "README.md"
 requires-python = "^3.13"
 dependencies = [
-    "openai (>=1.107.3,<2.0.0)"
+    "openai (>=1.107.3,<2.0.0)",
+    "click (>=8.0.0)"
 ]
 
 package-mode = false
+
+[project.scripts]
+uroflow = "uroflow:cli"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
