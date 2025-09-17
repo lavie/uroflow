@@ -44,7 +44,7 @@ From the weight-over-time data, you can derive:
 
 ### Step 1: Extract frames from video
 ```bash
-# Extract frames at 1 fps
+# Extract frames at 2 fps (for better data quality and redundancy)
 ./extract_frames.sh
 ```
 
