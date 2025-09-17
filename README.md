@@ -161,16 +161,45 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
   - No need for Python/Poetry knowledge
   - Auto-updates for new versions
 
-### Questions for Implementation
+### Implementation Decisions
 
-Before implementing these features, considerations include:
+#### Technical Choices
+- **PDF Generation**: ReportLab for professional medical-grade report control
+- **Packaging**: PyInstaller for standalone macOS executable (final step)
+- **Data Storage**: Persistent storage in `~/.uroflow/` with session management
+- **Frame Extraction**: Keep intermediate frames for potential re-analysis
+- **Video Processing**: Integrated ffmpeg subprocess calls
 
-1. **Patient Data**: Should the system support patient profiles or remain anonymous? How should patient identifiers be handled for privacy?
+#### Feature Specifications
+- **Patient ID**: Optional name field (CLI option or interactive prompt)
+- **Data Retention**: Permanent storage of all test sessions
+- **Report Format**: Single fixed English template, A4 PDF output
+- **Video Support**: MOV format (additional formats as needed)
+- **Frame Rate**: 2 fps extraction (configurable if needed)
 
-2. **Report Templates**: Should PDF reports be customizable? Support multiple languages or formats?
+#### Data Organization Structure
+```
+~/.uroflow/
+├── sessions/
+│   ├── 2024-01-15-143022-[patient-name]/
+│   │   ├── metadata.json          # Test info, video hash, timestamps
+│   │   ├── frames/                # Extracted frame images
+│   │   │   ├── frame_0001.jpg
+│   │   │   └── ...
+│   │   ├── weight_data.csv        # OCR results
+│   │   ├── weight_data.json       # Detailed OCR data
+│   │   ├── uroflow_chart.png      # Visualization
+│   │   └── report.pdf             # Complete analysis report
+│   └── latest -> 2024-01-15-143022-[patient-name]/  # Symlink to most recent
+└── config.json                    # User preferences
 
-3. **Data Retention**: How long should test sessions be retained? Should there be automatic cleanup of old sessions?
+```
 
-4. **Video Input**: Should we support direct camera recording or only pre-recorded files? What video formats beyond MOV?
-
-5. **Clinical Integration**: Should the system support export to medical record systems (HL7/FHIR)?
+#### Processing Pipeline
+1. Accept video file from any location (no need to copy to source)
+2. Create timestamped session directory
+3. Extract frames if not cached (check video hash)
+4. Run OCR if CSV doesn't exist
+5. Generate analysis and visualization
+6. Create PDF report with all results
+7. All intermediate files preserved for debugging/re-analysis
