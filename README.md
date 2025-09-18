@@ -84,6 +84,11 @@ All data is organized in sessions under `~/.uroflow/sessions/`:
 # With custom concurrency settings (for rate limit management)
 OCR_MAX_CONCURRENT=5 ./uroflow.py process input.mov  # Limit to 5 concurrent OCR calls
 OCR_MAX_PER_SECOND=2 ./uroflow.py process input.mov  # Limit to 2 requests per second
+
+# With custom smoothing window (for cleaner flow curves)
+./uroflow.py analyze --smoothing 8  # Use 8-second smoothing window
+./uroflow.py plot --smoothing 10    # Use 10-second smoothing for very smooth curves
+UROFLOW_SMOOTHING_SECONDS=8 ./uroflow.py analyze  # Set via environment variable
 ```
 
 #### Manual Step-by-Step (if needed)
@@ -128,6 +133,21 @@ OCR_MAX_PER_SECOND=2 ./uroflow.py process input.mov  # Limit to 2 requests per s
   - Metrics table with normal ranges
   - Clinical interpretation notes
   - Color-coded status indicators
+
+## Smoothing Configuration
+
+The tool uses configurable smoothing to reduce noise in flow measurements while preserving clinically relevant patterns:
+
+- **Default**: 8-second moving average window (optimal balance)
+- **Light smoothing** (5 seconds): Less smooth, preserves more detail
+- **Medium smoothing** (6 seconds): Moderate smoothing
+- **Heavy smoothing** (10 seconds): Very smooth curves, may lose fine details
+
+Configure via:
+- CLI parameter: `--smoothing 8.0`
+- Environment variable: `UROFLOW_SMOOTHING_SECONDS=8.0`
+
+The 2-second sustained rule for Qmax is applied regardless of smoothing level.
 
 ## Note
 

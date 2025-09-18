@@ -35,9 +35,11 @@ NORMAL_VOLUME_MIN = 150.0  # ml - minimum normal voided volume
 NORMAL_VOLUME_MAX = 500.0  # ml - maximum normal voided volume
 BORDERLINE_QMAX = 10.0  # ml/s - borderline peak flow threshold
 
-# Smoothing parameters (clinical standard)
-SMOOTHING_WINDOW_SIZE = int(os.getenv('UROFLOW_SMOOTHING_WINDOW', '3'))
-MIN_SUSTAINED_DURATION = float(os.getenv('UROFLOW_MIN_SUSTAINED_DURATION', '2.0'))  # 2-second rule
+# Smoothing parameters
+# Configure smoothing in seconds for clarity (converted to points based on 2 fps sampling)
+SMOOTHING_SECONDS = float(os.getenv('UROFLOW_SMOOTHING_SECONDS', '8.0'))  # Default 8 seconds
+SMOOTHING_WINDOW_SIZE = int(SMOOTHING_SECONDS * 2)  # Convert to points at 2 fps
+MIN_SUSTAINED_DURATION = float(os.getenv('UROFLOW_MIN_SUSTAINED_DURATION', '2.0'))  # 2-second rule for Qmax
 
 # OpenAI API configuration
 VISION_MODEL = "gpt-4o"
@@ -78,15 +80,16 @@ def smooth_flow_rates(flow_rates, window_size=None):
     return smoothed
 
 
-def calculate_qmax_2sec(flow_times, flow_rates, min_duration=None):
+def calculate_qmax_2sec(flow_times, flow_rates, min_duration=None, already_smoothed=False):
     """
     Calculate Qmax using the 2-second rule:
     Find the highest flow rate sustained for at least min_duration seconds
 
     Args:
         flow_times: List of time points
-        flow_rates: List of flow rate values
+        flow_rates: List of flow rate values (can be raw or already smoothed)
         min_duration: Minimum sustained duration in seconds (default: MIN_SUSTAINED_DURATION)
+        already_smoothed: If True, skip smoothing (data is already smoothed)
 
     Returns:
         Tuple of (qmax_value, qmax_index) where index is in the smoothed data
@@ -100,8 +103,11 @@ def calculate_qmax_2sec(flow_times, flow_rates, min_duration=None):
     if len(flow_rates) < 2:
         return max(flow_rates), 0
 
-    # First smooth the data
-    smoothed_rates = smooth_flow_rates(flow_rates)
+    # Only smooth if not already smoothed
+    if already_smoothed:
+        smoothed_rates = flow_rates
+    else:
+        smoothed_rates = smooth_flow_rates(flow_rates)
 
     # Find the highest sustained peak
     max_sustained = 0
@@ -433,7 +439,8 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
         smoothed_flow_rates = smooth_flow_rates(flow_rates)
 
         # Find peak flow using 2-second rule (returns both value and index)
-        peak_flow, peak_flow_index = calculate_qmax_2sec(flow_times, smoothed_flow_rates)
+        # Pass already_smoothed=True since we're providing smoothed data
+        peak_flow, peak_flow_index = calculate_qmax_2sec(flow_times, smoothed_flow_rates, already_smoothed=True)
 
         # Calculate average flow (excluding zero flows)
         non_zero_flows = [f for f in smoothed_flow_rates if f > MIN_FLOW_THRESHOLD]
@@ -473,7 +480,8 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
 
     # Plot both raw and smoothed flow rates
     line2_raw = ax2.plot(flow_times, flow_rates, color=color2_raw, linewidth=1, label='Raw Flow Rate', alpha=0.6, linestyle=':')
-    line2_smoothed = ax2.plot(flow_times, smoothed_flow_rates, color=color2, linewidth=2.5, label='Smoothed Flow Rate (2-sec rule)', alpha=0.9)
+    smoothing_label = f'Smoothed Flow Rate ({SMOOTHING_SECONDS}s window, 2-sec rule)'
+    line2_smoothed = ax2.plot(flow_times, smoothed_flow_rates, color=color2, linewidth=2.5, label=smoothing_label, alpha=0.9)
     ax2.tick_params(axis='y', labelcolor=color2)
 
     # Fill area under smoothed flow rate curve
@@ -653,7 +661,8 @@ def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False, generate
     smoothed_flow_rates = smooth_flow_rates(flow_rates)
 
     # Calculate Qmax using 2-second rule (clinically accurate)
-    peak_flow_rate, peak_flow_index = calculate_qmax_2sec(flow_times, smoothed_flow_rates)
+    # Pass already_smoothed=True since we're providing smoothed data
+    peak_flow_rate, peak_flow_index = calculate_qmax_2sec(flow_times, smoothed_flow_rates, already_smoothed=True)
 
     # Calculate time to peak
     time_to_peak = flow_times[peak_flow_index] - time_to_start if peak_flow_index < len(flow_times) else 0
@@ -807,8 +816,16 @@ def read(output_csv, session, patient_name, force):
 @click.option('--csv-file', help='CSV file to analyze (default: latest session)')
 @click.option('--plot/--no-plot', default=True, help='Generate visualization chart')
 @click.option('--session', help='Session ID to analyze')
-def analyze(csv_file, plot, session):
+@click.option('--smoothing', type=float, help='Smoothing window in seconds (default: 6.0)')
+def analyze(csv_file, plot, session, smoothing):
     """Analyze existing CSV data and display uroflowmetry metrics"""
+    # Override smoothing if specified
+    if smoothing:
+        global SMOOTHING_WINDOW_SIZE, SMOOTHING_SECONDS
+        SMOOTHING_SECONDS = smoothing
+        SMOOTHING_WINDOW_SIZE = int(smoothing * 2)  # Convert to points at 2 fps
+        click.echo(f"Using {smoothing}-second smoothing window ({SMOOTHING_WINDOW_SIZE} points)")
+
     if csv_file:
         # Direct file path provided
         analyze_uroflow_data(csv_file, create_plot=plot)
@@ -833,8 +850,16 @@ def analyze(csv_file, plot, session):
 @click.option('--output', help='Output PNG filename')
 @click.option('--show/--no-show', default=False, help='Display plot interactively')
 @click.option('--session', help='Session ID to plot')
-def plot(csv_file, output, show, session):
+@click.option('--smoothing', type=float, help='Smoothing window in seconds (default: 6.0)')
+def plot(csv_file, output, show, session, smoothing):
     """Create a visualization chart from uroflow data"""
+    # Override smoothing if specified
+    if smoothing:
+        global SMOOTHING_WINDOW_SIZE, SMOOTHING_SECONDS
+        SMOOTHING_SECONDS = smoothing
+        SMOOTHING_WINDOW_SIZE = int(smoothing * 2)  # Convert to points at 2 fps
+        click.echo(f"Using {smoothing}-second smoothing window ({SMOOTHING_WINDOW_SIZE} points)")
+
     if csv_file:
         # Direct file path provided
         output = output or 'uroflow_chart.png'
