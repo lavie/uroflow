@@ -11,6 +11,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 import numpy as np
+from pathlib import Path
+from session_manager import SessionManager
+import subprocess
+import shutil
 
 # Constants for validation and analysis
 MAX_FLOW_RATE = 20.0  # ml/s - maximum physiologically realistic flow rate
@@ -76,7 +80,7 @@ def extract_weight_from_image(image_path):
         print(f"Error processing {image_path}: {e}")
         return "error"
 
-def process_all_frames(output_csv='weight_data.csv', output_json='weight_data.json'):
+def process_all_frames(session_path=None, output_csv='weight_data.csv', output_json='weight_data.json'):
     """Process all frame images and extract weights"""
     
     # Check if API key is set
@@ -85,9 +89,18 @@ def process_all_frames(output_csv='weight_data.csv', output_json='weight_data.js
         click.echo("Set it with: export OPENAI_API_KEY='your-api-key-here'")
         return None
     
-    # Get all frame images, sorted by frame number
-    frame_files = sorted(glob.glob('frame_*.jpg'), 
-                        key=lambda x: int(x.split('_')[1].split('.')[0]))
+    # Get all frame images from session directory, sorted by frame number
+    if session_path:
+        frames_dir = Path(session_path) / 'frames'
+        frame_files = sorted(frames_dir.glob('frame_*.jpg'),
+                            key=lambda x: int(x.stem.split('_')[1]))
+        frame_files = [str(f) for f in frame_files]
+        output_csv = str(Path(session_path) / output_csv)
+        output_json = str(Path(session_path) / output_json)
+    else:
+        # Legacy: look in current directory
+        frame_files = sorted(glob.glob('frame_*.jpg'),
+                            key=lambda x: int(x.split('_')[1].split('.')[0]))
     
     if not frame_files:
         click.echo(click.style("No frame files found. Make sure you have frame_*.jpg files in the current directory.", fg='red'))
@@ -550,7 +563,14 @@ def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False):
 
     # Create plot if requested
     if create_plot:
-        create_uroflow_plot(csv_file)
+        # Determine output path based on CSV location
+        csv_path = Path(csv_file)
+        if csv_path.parent.name == 'sessions' or 'uroflow/sessions' in str(csv_path):
+            # We're in a session directory
+            output_file = csv_path.parent / 'uroflow_chart.png'
+        else:
+            output_file = 'uroflow_chart.png'
+        create_uroflow_plot(csv_file, str(output_file))
 
     return {
         'voided_volume': voided_volume,
@@ -570,27 +590,191 @@ def cli():
 @cli.command()
 @click.option('--output-csv', default='weight_data.csv', help='Output CSV filename')
 @click.option('--output-json', default='weight_data.json', help='Output JSON filename')
-def read(output_csv, output_json):
+@click.option('--session', help='Session ID or path to use')
+@click.option('--patient-name', help='Patient name for new session')
+def read(output_csv, output_json, session, patient_name):
     """Process frame images and extract weight readings using OpenAI Vision API"""
-    csv_file = process_all_frames(output_csv, output_json)
+    session_mgr = SessionManager()
+
+    # Get or create session
+    if session:
+        session_path = session_mgr.get_session(session)
+        if not session_path:
+            click.echo(click.style(f"Session '{session}' not found", fg='red'))
+            return
+    else:
+        # Create new session or use latest
+        session_path = session_mgr.get_session('latest')
+        if not session_path:
+            session_path = session_mgr.create_session(patient_name)
+            click.echo(f"Created new session: {session_path.name}")
+
+    # Check if OCR is needed
+    if not session_mgr.should_run_ocr(session_path):
+        click.echo(click.style("✓ OCR already completed for this session, skipping...", fg='green'))
+        csv_file = session_path / output_csv
+    else:
+        csv_file = process_all_frames(session_path, output_csv, output_json)
+
     if csv_file:
         click.echo("\nRunning analysis on the extracted data...")
-        analyze_uroflow_data(csv_file)
+        analyze_uroflow_data(str(csv_file), create_plot=True)
 
 @cli.command()
-@click.option('--csv-file', default='weight_data.csv', help='CSV file to analyze')
+@click.option('--csv-file', help='CSV file to analyze (default: latest session)')
 @click.option('--plot/--no-plot', default=True, help='Generate visualization chart')
-def analyze(csv_file, plot):
+@click.option('--session', help='Session ID to analyze')
+def analyze(csv_file, plot, session):
     """Analyze existing CSV data and display uroflowmetry metrics"""
-    analyze_uroflow_data(csv_file, create_plot=plot)
+    if csv_file:
+        # Direct file path provided
+        analyze_uroflow_data(csv_file, create_plot=plot)
+    else:
+        # Use session
+        session_mgr = SessionManager()
+        session_path = session_mgr.get_session(session or 'latest')
+
+        if not session_path:
+            click.echo(click.style("No sessions found. Run 'uroflow read' first.", fg='red'))
+            return
+
+        csv_path = session_path / 'weight_data.csv'
+        if not csv_path.exists():
+            click.echo(click.style(f"No data found in session. Run 'uroflow read' first.", fg='red'))
+            return
+
+        analyze_uroflow_data(str(csv_path), create_plot=plot)
 
 @cli.command()
-@click.option('--csv-file', default='weight_data.csv', help='CSV file to plot')
-@click.option('--output', default='uroflow_chart.png', help='Output PNG filename')
+@click.option('--csv-file', help='CSV file to plot (default: latest session)')
+@click.option('--output', help='Output PNG filename')
 @click.option('--show/--no-show', default=False, help='Display plot interactively')
-def plot(csv_file, output, show):
+@click.option('--session', help='Session ID to plot')
+def plot(csv_file, output, show, session):
     """Create a visualization chart from uroflow data"""
-    create_uroflow_plot(csv_file, output, show_plot=show)
+    if csv_file:
+        # Direct file path provided
+        output = output or 'uroflow_chart.png'
+        create_uroflow_plot(csv_file, output, show_plot=show)
+    else:
+        # Use session
+        session_mgr = SessionManager()
+        session_path = session_mgr.get_session(session or 'latest')
+
+        if not session_path:
+            click.echo(click.style("No sessions found. Run 'uroflow read' first.", fg='red'))
+            return
+
+        csv_path = session_path / 'weight_data.csv'
+        if not csv_path.exists():
+            click.echo(click.style(f"No data found in session. Run 'uroflow read' first.", fg='red'))
+            return
+
+        output_path = session_path / (output or 'uroflow_chart.png')
+        create_uroflow_plot(str(csv_path), str(output_path), show_plot=show)
+
+@cli.command()
+def sessions():
+    """List all analysis sessions"""
+    session_mgr = SessionManager()
+    sessions = session_mgr.list_sessions()
+
+    if not sessions:
+        click.echo("No sessions found.")
+        return
+
+    click.echo("\nAvailable sessions:")
+    click.echo("="*80)
+
+    for sess in sessions:
+        patient_info = f" - {sess['patient_name']}" if sess['patient_name'] else ""
+        steps = sess['steps']
+
+        # Create status indicators
+        status_icons = []
+        if steps.get('frames_extracted'):
+            status_icons.append('📷')
+        if steps.get('ocr_completed'):
+            status_icons.append('🔍')
+        if steps.get('analysis_completed'):
+            status_icons.append('📊')
+        if steps.get('report_generated'):
+            status_icons.append('📄')
+
+        status_str = ' '.join(status_icons) if status_icons else '⏳'
+
+        click.echo(f"{sess['id']}{patient_info}")
+        click.echo(f"  Status: {status_str}")
+        click.echo(f"  Path: {sess['path']}")
+        click.echo("-"*80)
+
+@cli.command()
+@click.argument('video_path', type=click.Path(exists=True))
+@click.option('--patient-name', prompt='Patient name (optional)', default='', help='Patient name for the session')
+@click.option('--fps', default=2, help='Frames per second to extract')
+def process(video_path, patient_name, fps):
+    """Process a video file from start to finish (frames -> OCR -> analysis -> report)"""
+    session_mgr = SessionManager()
+    video_path = Path(video_path).resolve()
+
+    # Clean patient name
+    patient_name = patient_name.strip() if patient_name else None
+
+    # Get or create session for this video
+    session_path = session_mgr.get_or_create_session_from_video(video_path, patient_name)
+    click.echo(f"\nUsing session: {session_path.name}")
+
+    # Step 1: Extract frames if needed
+    if session_mgr.should_extract_frames(session_path, video_path):
+        click.echo("\n📷 Extracting frames from video...")
+        frames_dir = session_path / 'frames'
+
+        # Check if ffmpeg is available
+        if not shutil.which('ffmpeg'):
+            click.echo(click.style("Error: ffmpeg not found. Please install ffmpeg.", fg='red'))
+            click.echo("On macOS: brew install ffmpeg")
+            return
+
+        # Run ffmpeg to extract frames
+        cmd = [
+            'ffmpeg', '-i', str(video_path),
+            '-vf', f'fps={fps}',
+            '-q:v', '2',
+            str(frames_dir / 'frame_%04d.jpg')
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                click.echo(click.style(f"Error extracting frames: {result.stderr}", fg='red'))
+                return
+
+            # Count extracted frames
+            frame_count = len(list(frames_dir.glob('frame_*.jpg')))
+            click.echo(click.style(f"✓ Extracted {frame_count} frames", fg='green'))
+        except Exception as e:
+            click.echo(click.style(f"Error running ffmpeg: {e}", fg='red'))
+            return
+    else:
+        click.echo(click.style("✓ Frames already extracted, using cached frames", fg='green'))
+
+    # Step 2: Run OCR if needed
+    if session_mgr.should_run_ocr(session_path):
+        click.echo("\n🔍 Processing frames with OCR...")
+        csv_file = process_all_frames(session_path)
+        if not csv_file:
+            click.echo(click.style("Error during OCR processing", fg='red'))
+            return
+    else:
+        click.echo(click.style("✓ OCR already completed, using cached data", fg='green'))
+
+    # Step 3: Analyze and create chart
+    click.echo("\n📊 Analyzing uroflow data...")
+    csv_path = session_path / 'weight_data.csv'
+    analyze_uroflow_data(str(csv_path), create_plot=True)
+
+    click.echo(click.style(f"\n✅ Processing complete! Session: {session_path.name}", fg='green', bold=True))
+    click.echo(f"Results saved in: {session_path}")
 
 if __name__ == '__main__':
     cli()
