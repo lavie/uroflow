@@ -17,6 +17,7 @@ import subprocess
 import shutil
 import asyncio
 from async_ocr import AsyncOCRProcessor, get_max_concurrent, get_max_per_second
+from pdf_report import UroflowReportGenerator
 
 # Constants for validation and analysis
 MAX_FLOW_RATE = 20.0  # ml/s - maximum physiologically realistic flow rate
@@ -34,12 +35,116 @@ NORMAL_VOLUME_MIN = 150.0  # ml - minimum normal voided volume
 NORMAL_VOLUME_MAX = 500.0  # ml - maximum normal voided volume
 BORDERLINE_QMAX = 10.0  # ml/s - borderline peak flow threshold
 
+# Smoothing parameters (clinical standard)
+SMOOTHING_WINDOW_SIZE = int(os.getenv('UROFLOW_SMOOTHING_WINDOW', '3'))
+MIN_SUSTAINED_DURATION = float(os.getenv('UROFLOW_MIN_SUSTAINED_DURATION', '2.0'))  # 2-second rule
+
 # OpenAI API configuration
 VISION_MODEL = "gpt-4o"
 MAX_TOKENS = 100
 
 # Set up the client using environment variable
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+
+def smooth_flow_rates(flow_rates, window_size=None):
+    """
+    Apply moving average smoothing to flow rate data
+
+    Args:
+        flow_rates: List of flow rate values
+        window_size: Size of the smoothing window (default: SMOOTHING_WINDOW_SIZE)
+
+    Returns:
+        List of smoothed flow rate values
+    """
+    if window_size is None:
+        window_size = SMOOTHING_WINDOW_SIZE
+
+    if len(flow_rates) <= 1 or window_size <= 1:
+        return flow_rates
+
+    smoothed = []
+    for i in range(len(flow_rates)):
+        # Calculate window bounds
+        half_window = window_size // 2
+        start = max(0, i - half_window)
+        end = min(len(flow_rates), i + half_window + 1)
+
+        # Calculate moving average
+        window_values = flow_rates[start:end]
+        smoothed.append(sum(window_values) / len(window_values))
+
+    return smoothed
+
+
+def calculate_qmax_2sec(flow_times, flow_rates, min_duration=None):
+    """
+    Calculate Qmax using the 2-second rule:
+    Find the highest flow rate sustained for at least min_duration seconds
+
+    Args:
+        flow_times: List of time points
+        flow_rates: List of flow rate values
+        min_duration: Minimum sustained duration in seconds (default: MIN_SUSTAINED_DURATION)
+
+    Returns:
+        Tuple of (qmax_value, qmax_index) where index is in the smoothed data
+    """
+    if min_duration is None:
+        min_duration = MIN_SUSTAINED_DURATION
+
+    if not flow_rates:
+        return 0, 0
+
+    if len(flow_rates) < 2:
+        return max(flow_rates), 0
+
+    # First smooth the data
+    smoothed_rates = smooth_flow_rates(flow_rates)
+
+    # Find the highest sustained peak
+    max_sustained = 0
+    max_sustained_index = 0
+
+    for i in range(len(smoothed_rates)):
+        current_rate = smoothed_rates[i]
+
+        # Skip if this rate is lower than what we've already found
+        if current_rate <= max_sustained:
+            continue
+
+        start_time = flow_times[i]
+
+        # Check how long this flow rate is sustained (within 10% tolerance)
+        threshold = current_rate * 0.9
+        sustained_until = i
+
+        for j in range(i + 1, len(smoothed_rates)):
+            if smoothed_rates[j] >= threshold:
+                sustained_until = j
+            else:
+                break
+
+        # Calculate duration this rate was sustained
+        if sustained_until > i:
+            sustained_duration = flow_times[sustained_until] - start_time
+            if sustained_duration >= min_duration:
+                # Find the actual peak within this sustained period
+                # Use the middle of the sustained period or where the actual max occurs
+                period_values = smoothed_rates[i:sustained_until+1]
+                local_max = max(period_values)
+                local_max_offset = period_values.index(local_max)
+                max_sustained = local_max
+                max_sustained_index = i + local_max_offset
+
+    # If no sustained peak found (e.g., very short test), use smoothed max
+    if max_sustained == 0:
+        max_val = max(smoothed_rates)
+        max_sustained_index = smoothed_rates.index(max_val)
+        return max_val, max_sustained_index
+
+    return max_sustained, max_sustained_index
 
 def encode_image(image_path):
     """Encode image to base64"""
@@ -275,56 +380,72 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv'):
     
     return output_csv
 
-def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.png', show_plot=False):
-    """Create a comprehensive uroflow visualization chart"""
+def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.png', show_plot=False, metrics=None):
+    """Create a comprehensive uroflow visualization chart with both raw and smoothed curves"""
 
-    # Read the CSV data
-    times = []
-    weights = []
+    # If metrics provided, use that data (includes both raw and smoothed)
+    if metrics and 'flow_rates' in metrics and 'smoothed_flow_rates' in metrics:
+        times = metrics['times']
+        weights = metrics['weights']
+        flow_times = metrics['flow_times']
+        flow_rates = metrics['flow_rates']
+        smoothed_flow_rates = metrics['smoothed_flow_rates']
+        peak_flow = metrics['peak_flow_rate']  # This is the smoothed Qmax
+        peak_flow_index = metrics.get('peak_flow_index', 0)  # Get index from metrics
+        avg_flow = metrics['average_flow_rate']  # This is also from smoothed data
+    else:
+        # Read the CSV data
+        times = []
+        weights = []
 
-    try:
-        with open(csv_file, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    weight = float(row['weight'])
-                    time = float(row['time_seconds'])
-                    times.append(time)
-                    weights.append(weight)
-                except (ValueError, TypeError):
-                    continue
-    except FileNotFoundError:
-        click.echo(click.style(f"Error: {csv_file} not found. Run 'uroflow read' first to process frames.", fg='red'))
-        return None
+        try:
+            with open(csv_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        weight = float(row['weight'])
+                        time = float(row['time_seconds'])
+                        times.append(time)
+                        weights.append(weight)
+                    except (ValueError, TypeError):
+                        continue
+        except FileNotFoundError:
+            click.echo(click.style(f"Error: {csv_file} not found. Run 'uroflow read' first to process frames.", fg='red'))
+            return None
 
-    if len(weights) < 2:
-        click.echo(click.style("Insufficient valid data points for plotting", fg='red'))
-        return None
+        if len(weights) < 2:
+            click.echo(click.style("Insufficient valid data points for plotting", fg='red'))
+            return None
+
+        # Calculate flow rates (ml/s)
+        flow_rates = []
+        flow_times = []
+
+        for i in range(1, len(weights)):
+            dt = times[i] - times[i-1]
+            if dt > 0:
+                dw = weights[i] - weights[i-1]
+                flow_rate = max(0, dw / dt)  # Only positive flow rates
+                flow_rates.append(flow_rate)
+                flow_times.append(times[i])
+
+        # Apply smoothing
+        smoothed_flow_rates = smooth_flow_rates(flow_rates)
+
+        # Find peak flow using 2-second rule (returns both value and index)
+        peak_flow, peak_flow_index = calculate_qmax_2sec(flow_times, smoothed_flow_rates)
+
+        # Calculate average flow (excluding zero flows)
+        non_zero_flows = [f for f in smoothed_flow_rates if f > MIN_FLOW_THRESHOLD]
+        avg_flow = sum(non_zero_flows) / len(non_zero_flows) if non_zero_flows else 0
 
     # Calculate cumulative volume (ml)
     initial_weight = weights[0]
     volumes = [w - initial_weight for w in weights]
 
-    # Calculate flow rates (ml/s)
-    flow_rates = [0]  # Start with 0 flow
-    flow_times = [times[0]]
-
-    for i in range(1, len(weights)):
-        dt = times[i] - times[i-1]
-        if dt > 0:
-            dw = weights[i] - weights[i-1]
-            flow_rate = max(0, dw / dt)  # Only positive flow rates
-            flow_rates.append(flow_rate)
-            flow_times.append(times[i])
-
-    # Find peak flow
-    peak_flow = max(flow_rates) if flow_rates else 0
-    peak_flow_index = flow_rates.index(peak_flow) if flow_rates else 0
-    peak_flow_time = flow_times[peak_flow_index] if flow_rates else 0
-
-    # Calculate average flow (excluding zero flows)
-    non_zero_flows = [f for f in flow_rates if f > MIN_FLOW_THRESHOLD]
-    avg_flow = sum(non_zero_flows) / len(non_zero_flows) if non_zero_flows else 0
+    # Calculate peak flow time using the index from calculate_qmax_2sec or metrics
+    # peak_flow_index is already set either from metrics or from calculate_qmax_2sec
+    peak_flow_time = flow_times[peak_flow_index] if flow_times and peak_flow_index < len(flow_times) else 0
 
     # Create figure with landscape A4 dimensions (11.7 x 8.3 inches)
     fig = plt.figure(figsize=(11.7, 8.3))
@@ -347,12 +468,16 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
     # Create second y-axis for flow rate
     ax2 = ax1.twinx()
     color2 = '#A23B72'  # Nice purple
+    color2_raw = '#B87A7A'  # Darker purple for raw data (30% darker than #D4A5A5)
     ax2.set_ylabel('Flow Rate (ml/s)', color=color2, fontsize=12)
-    line2 = ax2.plot(flow_times, flow_rates, color=color2, linewidth=2, label='Flow Rate', alpha=0.8)
+
+    # Plot both raw and smoothed flow rates
+    line2_raw = ax2.plot(flow_times, flow_rates, color=color2_raw, linewidth=1, label='Raw Flow Rate', alpha=0.6, linestyle=':')
+    line2_smoothed = ax2.plot(flow_times, smoothed_flow_rates, color=color2, linewidth=2.5, label='Smoothed Flow Rate (2-sec rule)', alpha=0.9)
     ax2.tick_params(axis='y', labelcolor=color2)
 
-    # Fill area under flow rate curve
-    ax2.fill_between(flow_times, flow_rates, alpha=0.2, color=color2)
+    # Fill area under smoothed flow rate curve
+    ax2.fill_between(flow_times, smoothed_flow_rates, alpha=0.2, color=color2)
 
     # Mark Qmax with vertical line and annotation
     if peak_flow > 0:
@@ -373,10 +498,12 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
     # Set axis limits
     ax1.set_xlim(0, max(times) * 1.05)
     ax1.set_ylim(0, max(volumes) * 1.1)
-    ax2.set_ylim(0, max(flow_rates) * 1.2)
+    # Use max of both raw and smoothed for y-axis limit
+    max_flow = max(max(flow_rates) if flow_rates else 0, max(smoothed_flow_rates) if smoothed_flow_rates else 0)
+    ax2.set_ylim(0, max_flow * 1.2)
 
-    # Add legend
-    lines = line1 + line2
+    # Add legend with all lines
+    lines = line1 + line2_raw + line2_smoothed
     labels = [l.get_label() for l in lines]
     ax1.legend(lines, labels, loc='upper left', fontsize=10)
 
@@ -393,15 +520,16 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
 
     # Create stats text
     stats_text = (
-        f"Key Metrics:\n\n"
+        f"Key Metrics (Smoothed):\n\n"
         f"Total Volume: {total_volume:.1f} ml\n"
-        f"Peak Flow Rate (Qmax): {peak_flow:.1f} ml/s\n"
+        f"Peak Flow Rate (Qmax)*: {peak_flow:.1f} ml/s\n"
         f"Average Flow Rate: {avg_flow:.1f} ml/s\n"
         f"Time to Peak: {peak_flow_time:.1f} s\n"
         f"Total Time: {total_time:.1f} s\n\n"
         f"Reference Values (Adult Male):\n"
         f"Normal Qmax: >15 ml/s\n"
-        f"Normal Volume: 150-500 ml"
+        f"Normal Volume: 150-500 ml\n\n"
+        f"*2-sec sustained rule applied"
     )
 
     stats_ax.text(0.05, 0.95, stats_text, transform=stats_ax.transAxes,
@@ -461,7 +589,7 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
     click.echo(click.style(f"\n✓ Chart saved to {output_file}", fg='green'))
     return output_file
 
-def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False):
+def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False, generate_report=False, session_path=None):
     """Analyze the weight data and calculate uroflowmetry metrics"""
     
     # Read the CSV data
@@ -521,12 +649,17 @@ def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False):
     time_to_start = times[start_index] if start_index > 0 else 0
     
     # Flow metrics
-    peak_flow_rate = max(flow_rates) if flow_rates else 0
-    peak_flow_index = flow_rates.index(peak_flow_rate) if flow_rates else 0
-    time_to_peak = flow_times[peak_flow_index] - time_to_start if flow_rates else 0
+    # Use smoothed flow rates for analysis
+    smoothed_flow_rates = smooth_flow_rates(flow_rates)
+
+    # Calculate Qmax using 2-second rule (clinically accurate)
+    peak_flow_rate, peak_flow_index = calculate_qmax_2sec(flow_times, smoothed_flow_rates)
+
+    # Calculate time to peak
+    time_to_peak = flow_times[peak_flow_index] - time_to_start if peak_flow_index < len(flow_times) else 0
     
-    # Calculate average flow rate (excluding zero flow periods)
-    non_zero_flows = [f for f in flow_rates if f > MIN_FLOW_THRESHOLD]
+    # Calculate average flow rate (excluding zero flow periods, using smoothed data)
+    non_zero_flows = [f for f in smoothed_flow_rates if f > MIN_FLOW_THRESHOLD]
     average_flow_rate = sum(non_zero_flows) / len(non_zero_flows) if non_zero_flows else 0
     
     # Flow time (from start to when flow essentially stops)
@@ -585,6 +718,24 @@ def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False):
     
     click.echo("\n" + "="*60)
 
+    # Prepare metrics dictionary
+    metrics = {
+        'voided_volume': voided_volume,
+        'peak_flow_rate': peak_flow_rate,
+        'peak_flow_index': peak_flow_index,  # Include index for chart alignment
+        'average_flow_rate': average_flow_rate,
+        'time_to_start': time_to_start,
+        'time_to_peak': time_to_peak,
+        'flow_time': flow_time,
+        'total_time': times[-1],
+        # Include flow data for charting
+        'times': times,
+        'weights': weights,
+        'flow_times': flow_times,
+        'flow_rates': flow_rates,
+        'smoothed_flow_rates': smoothed_flow_rates
+    }
+
     # Create plot if requested
     if create_plot:
         # Determine output path based on CSV location
@@ -592,19 +743,19 @@ def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False):
         if csv_path.parent.name == 'sessions' or 'uroflow/sessions' in str(csv_path):
             # We're in a session directory
             output_file = csv_path.parent / 'uroflow_chart.png'
+            if not session_path:
+                session_path = csv_path.parent
         else:
             output_file = 'uroflow_chart.png'
-        create_uroflow_plot(csv_file, str(output_file))
+        create_uroflow_plot(csv_file, str(output_file), metrics=metrics)
 
-    return {
-        'voided_volume': voided_volume,
-        'peak_flow_rate': peak_flow_rate,
-        'average_flow_rate': average_flow_rate,
-        'time_to_start': time_to_start,
-        'time_to_peak': time_to_peak,
-        'flow_time': flow_time,
-        'total_time': times[-1]
-    }
+    # Generate PDF report if requested
+    if generate_report and session_path:
+        report_generator = UroflowReportGenerator(Path(session_path))
+        report_path = report_generator.generate_report(metrics)
+        click.echo(click.style(f"\n📄 PDF report generated: {report_path}", fg='green'))
+
+    return metrics
 
 @click.group()
 def cli():
@@ -650,7 +801,7 @@ def read(output_csv, session, patient_name, force):
 
     if csv_file:
         click.echo("\nRunning analysis on the extracted data...")
-        analyze_uroflow_data(str(csv_file), create_plot=True)
+        analyze_uroflow_data(str(csv_file), create_plot=True, generate_report=False, session_path=session_path)
 
 @cli.command()
 @click.option('--csv-file', help='CSV file to analyze (default: latest session)')
@@ -675,7 +826,7 @@ def analyze(csv_file, plot, session):
             click.echo(click.style(f"No data found in session. Run 'uroflow read' first.", fg='red'))
             return
 
-        analyze_uroflow_data(str(csv_path), create_plot=plot)
+        analyze_uroflow_data(str(csv_path), create_plot=plot, generate_report=False, session_path=session_path)
 
 @cli.command()
 @click.option('--csv-file', help='CSV file to plot (default: latest session)')
@@ -750,6 +901,38 @@ def sessions():
         click.echo(f"  Status: {status_str}")
         click.echo(f"  Path: {sess['path']}")
         click.echo("-"*80)
+
+@cli.command()
+@click.option('--session', help='Session ID to generate report for (default: latest)')
+def report(session):
+    """Generate or regenerate PDF report for a session"""
+    session_mgr = SessionManager()
+    session_path = session_mgr.get_session(session or 'latest')
+
+    if not session_path:
+        click.echo(click.style("No sessions found.", fg='red'))
+        return
+
+    # Check if we have the necessary files
+    csv_path = session_path / 'weight_data.csv'
+    if not csv_path.exists():
+        click.echo(click.style(f"No analysis data found in session. Run 'uroflow analyze' first.", fg='red'))
+        return
+
+    chart_path = session_path / 'uroflow_chart.png'
+    if not chart_path.exists():
+        click.echo("Chart not found, generating...")
+        create_uroflow_plot(str(csv_path), str(chart_path))
+
+    # Analyze data to get metrics
+    click.echo(f"Generating report for session: {session_path.name}")
+    metrics = analyze_uroflow_data(str(csv_path), create_plot=False, generate_report=False)
+
+    # Generate PDF report
+    report_generator = UroflowReportGenerator(session_path)
+    report_path = report_generator.generate_report(metrics)
+
+    click.echo(click.style(f"✅ Report generated: {report_path}", fg='green', bold=True))
 
 @cli.command()
 @click.argument('video_path', type=click.Path(exists=True))
@@ -835,7 +1018,7 @@ def process(video_path, patient_name, fps, force):
     # Step 3: Analyze and create chart
     click.echo("\n📊 Analyzing uroflow data...")
     csv_path = session_path / 'weight_data.csv'
-    analyze_uroflow_data(str(csv_path), create_plot=True)
+    analyze_uroflow_data(str(csv_path), create_plot=True, generate_report=True, session_path=session_path)
 
     click.echo(click.style(f"\n✅ Processing complete! Session: {session_path.name}", fg='green', bold=True))
     click.echo(f"Results saved in: {session_path}")

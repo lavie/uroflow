@@ -104,11 +104,12 @@ OCR_MAX_PER_SECOND=2 ./uroflow.py process input.mov  # Limit to 2 requests per s
 
 ### CLI Commands
 
-- `uroflow process <video>` - Complete pipeline: video → frames → OCR → analysis → chart
+- `uroflow process <video>` - Complete pipeline: video → frames → OCR → analysis → chart → PDF report
 - `uroflow sessions` - List all analysis sessions with their status
 - `uroflow read` - Process frame images with OCR (uses session management)
 - `uroflow analyze` - Analyze data and generate chart (default: latest session)
 - `uroflow plot` - Create visualization chart (default: latest session)
+- `uroflow report` - Generate professional PDF report (default: latest session)
 - `uroflow --help` - Show all available commands
 
 ## Output
@@ -121,6 +122,12 @@ OCR_MAX_PER_SECOND=2 ./uroflow.py process input.mov  # Limit to 2 requests per s
   - Average flow rate line
   - Key metrics and clinical interpretation
   - Reference values for comparison
+- `report.pdf`: Professional medical report including:
+  - Patient information and test date
+  - Embedded flow chart
+  - Metrics table with normal ranges
+  - Clinical interpretation notes
+  - Color-coded status indicators
 
 ## Note
 
@@ -234,10 +241,13 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
   - `OCR_MAX_CONCURRENT`: Max concurrent API calls (default: 10)
   - `OCR_MAX_PER_SECOND`: Max requests per second (default: 5)
 
-**Phase 2: PDF Report Generation** (Ready to implement)
-- Add ReportLab for professional PDF generation
-- Single-page A4 report with chart, metrics, and clinical interpretation
-- Include test date/time and patient name
+**Phase 2: PDF Report Generation** ✅ COMPLETED
+- ✅ ReportLab integration for professional PDF generation
+- ✅ Single-page A4 report with embedded chart and metrics table
+- ✅ Clinical interpretation based on normal ranges
+- ✅ Test date/time and patient name included
+- ✅ Automatic generation during `process` command
+- ✅ Manual generation with `report` command
 
 **Phase 4: macOS Packaging** (After core features complete)
 - PyInstaller for standalone executable
