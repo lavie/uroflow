@@ -42,63 +42,68 @@ From the weight-over-time data, you can derive:
 
 ## Usage
 
-### Step 1: Extract frames from video
+### Quick Start: One-Step Processing
+
 ```bash
-# Extract frames at 2 fps (for better data quality and redundancy)
-./extract_frames.sh
+# Process a video file from start to finish
+./uroflow.py process video.mov
+
+# You'll be prompted for patient name (optional)
+# The system will:
+# 1. Create a timestamped session in ~/.uroflow/sessions/
+# 2. Extract frames from video (if not already cached)
+# 3. Process frames with OCR (if not already done)
+# 4. Generate analysis and visualization chart
 ```
 
-### Step 2: Process frames and analyze
+### Session Management
 
-Using the Click CLI tool:
+All data is organized in sessions under `~/.uroflow/sessions/`:
 
 ```bash
-# Process frames with OpenAI Vision API and analyze results
-./uroflow.py read
+# List all sessions
+./uroflow.py sessions
 
-# Or process with custom output files
-./uroflow.py read --output-csv my_data.csv --output-json my_data.json
+# Work with latest session
+./uroflow.py analyze  # Re-analyze latest session
+./uroflow.py plot     # Regenerate chart for latest
+
+# Work with specific session
+./uroflow.py analyze --session 2024-01-15-143022
+./uroflow.py plot --session 2024-01-15-143022-John_Doe
 ```
 
-### Step 3: Re-analyze existing data
+### Individual Commands
 
+#### Process Video (Recommended)
 ```bash
-# Analyze previously extracted CSV data (includes chart generation)
-./uroflow.py analyze
-
-# Analyze without generating chart
-./uroflow.py analyze --no-plot
-
-# Or analyze a specific CSV file
-./uroflow.py analyze --csv-file my_data.csv
+./uroflow.py process input.mov --patient-name "John Doe"
+./uroflow.py process input.mov --fps 3  # Custom frame rate
 ```
 
-### Step 4: Generate visualization chart
-
+#### Manual Step-by-Step (if needed)
 ```bash
-# Create a comprehensive flow chart from existing data
-./uroflow.py plot
+# 1. Extract frames only
+./extract_frames.sh input.mov  # Legacy bash script
 
-# Custom output filename
-./uroflow.py plot --output my_uroflow_chart.png
+# 2. Run OCR on frames
+./uroflow.py read --session latest
 
-# Display chart interactively (requires GUI)
-./uroflow.py plot --show
+# 3. Analyze data
+./uroflow.py analyze --session latest
+
+# 4. Generate chart
+./uroflow.py plot --session latest
 ```
 
 ### CLI Commands
 
-- `uroflow read` - Processes frame images, extracts weights via OCR, and runs analysis
-- `uroflow analyze` - Analyzes existing CSV data and generates chart (use `--no-plot` to skip chart)
-- `uroflow plot` - Creates a comprehensive visualization chart with dual-axis flow/volume graph
-- `uroflow --help` - Show help and available commands
-
-### Legacy script
-
-The original script is still available:
-```bash
-python main.py
-```
+- `uroflow process <video>` - Complete pipeline: video → frames → OCR → analysis → chart
+- `uroflow sessions` - List all analysis sessions with their status
+- `uroflow read` - Process frame images with OCR (uses session management)
+- `uroflow analyze` - Analyze data and generate chart (default: latest session)
+- `uroflow plot` - Create visualization chart (default: latest session)
+- `uroflow --help` - Show all available commands
 
 ## Output
 
@@ -124,15 +129,19 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 ✅ Flow metrics calculation and analysis
 ✅ Visualization charts with clinical interpretation
 ✅ CSV/JSON data export
+✅ Session-based data management in `~/.uroflow/sessions/`
+✅ Smart caching (skip completed steps)
+✅ One-command processing from video to analysis
 
 ### Planned Enhancements
 
-#### 1. One-Step Processing
-- **Goal**: Single command to go from MOV file to complete report
+#### 1. One-Step Processing ✅ COMPLETED
+- **Implemented**: `uroflow process <video>` command
 - **Features**:
-  - Integrate frame extraction into the Python CLI
-  - Auto-detect video format and settings
-  - Progress tracking for the entire pipeline
+  - ✅ Integrated frame extraction via ffmpeg subprocess
+  - ✅ Smart caching based on video hash
+  - ✅ Progress tracking with status messages
+  - ✅ Session management with patient names
 
 #### 2. PDF Report Generation
 - **Goal**: Professional A4 PDF report with complete analysis
@@ -143,14 +152,15 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
   - Clinical metrics summary
   - Export for medical records
 
-#### 3. Smart Data Management
-- **Goal**: Organize test data outside source code with intelligent caching
+#### 3. Smart Data Management ✅ COMPLETED
+- **Implemented**: Filesystem-based session management
 - **Features**:
-  - Structured test sessions (e.g., `~/.uroflow/sessions/YYYY-MM-DD-HHMMSS/`)
-  - Idempotent processing (skip already-completed steps)
-  - Cache management: reuse frames if video unchanged, reuse CSV if frames unchanged
-  - Support multiple tests without data collision
-  - Optional test naming/tagging for easy retrieval
+  - ✅ Structured sessions: `~/.uroflow/sessions/YYYY-MM-DD-HHMMSS-[patient]/`
+  - ✅ Idempotent processing (checks filesystem for completed steps)
+  - ✅ Smart caching: video hash validation, skip existing frames/OCR
+  - ✅ Multiple tests without collision
+  - ✅ Patient name tagging in session directories
+  - ✅ Filesystem as single source of truth (no redundant metadata)
 
 #### 4. Standalone macOS Application
 - **Goal**: Easy installation without technical prerequisites
@@ -177,29 +187,51 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 - **Video Support**: MOV format (additional formats as needed)
 - **Frame Rate**: 2 fps extraction (configurable if needed)
 
-#### Data Organization Structure
+#### Data Organization Structure (Implemented)
 ```
 ~/.uroflow/
-├── sessions/
-│   ├── 2024-01-15-143022-[patient-name]/
-│   │   ├── metadata.json          # Test info, video hash, timestamps
-│   │   ├── frames/                # Extracted frame images
-│   │   │   ├── frame_0001.jpg
-│   │   │   └── ...
-│   │   ├── weight_data.csv        # OCR results
-│   │   ├── weight_data.json       # Detailed OCR data
-│   │   ├── uroflow_chart.png      # Visualization
-│   │   └── report.pdf             # Complete analysis report
-│   └── latest -> 2024-01-15-143022-[patient-name]/  # Symlink to most recent
-└── config.json                    # User preferences
-
+└── sessions/
+    ├── 2024-01-15-143022-John_Doe/
+    │   ├── metadata.json          # Minimal: patient name, video hash
+    │   ├── frames/                # Extracted frame images
+    │   │   ├── frame_0001.jpg
+    │   │   └── ...
+    │   ├── weight_data.csv        # OCR results
+    │   ├── weight_data.json       # Detailed OCR data
+    │   ├── uroflow_chart.png      # Visualization
+    │   └── report.pdf             # (Coming in Phase 2)
+    └── latest -> 2024-01-15-143022-John_Doe/  # Symlink to most recent
 ```
 
-#### Processing Pipeline
-1. Accept video file from any location (no need to copy to source)
-2. Create timestamped session directory
-3. Extract frames if not cached (check video hash)
-4. Run OCR if CSV doesn't exist
-5. Generate analysis and visualization
-6. Create PDF report with all results
-7. All intermediate files preserved for debugging/re-analysis
+**Session Status Detection (filesystem-based):**
+- Frames extracted: `frames/*.jpg` files exist
+- OCR completed: `weight_data.csv` and `.json` exist
+- Analysis done: `uroflow_chart.png` exists
+- Report generated: `report.pdf` exists (Phase 2)
+
+#### Processing Pipeline (Implemented)
+1. ✅ Accept video file from any location
+2. ✅ Create timestamped session directory with patient name
+3. ✅ Extract frames if not cached (validates video hash)
+4. ✅ Run OCR if CSV doesn't exist
+5. ✅ Generate analysis and visualization chart
+6. ⏳ Create PDF report (Phase 2 - pending)
+7. ✅ All intermediate files preserved for re-analysis
+
+### Next Steps
+
+**Performance Optimization: Concurrent OCR Processing**
+- Add concurrent/parallel processing for OCR API calls
+- Implement exponential backoff and retry logic for API rate limits
+- Refactor frame validation to occur after all OCR completes (since frames won't be processed in order)
+- Expected speedup: 5-10x for OCR phase
+- Consider using `asyncio` or `concurrent.futures` for parallel API calls
+
+**Phase 2: PDF Report Generation** (Ready to implement)
+- Add ReportLab for professional PDF generation
+- Single-page A4 report with chart, metrics, and clinical interpretation
+- Include test date/time and patient name
+
+**Phase 4: macOS Packaging** (After core features complete)
+- PyInstaller for standalone executable
+- Bundle all dependencies including ffmpeg

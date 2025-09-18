@@ -118,7 +118,9 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv', output_j
     with click.progressbar(frame_files, label='Processing frames') as bar:
         for frame_file in bar:
             weight = extract_weight_from_image(frame_file)
-            frame_number = int(frame_file.split('_')[1].split('.')[0])
+            # Extract frame number from filename, not full path
+            filename = Path(frame_file).name
+            frame_number = int(filename.split('_')[1].split('.')[0])
             # With 2 fps: frame 1,2 = 0s; frame 3,4 = 1s; etc.
             current_time = (frame_number - 1) * FRAME_INTERVAL  # 0, 0.5, 1, 1.5, 2, ...
             
@@ -690,18 +692,29 @@ def sessions():
         patient_info = f" - {sess['patient_name']}" if sess['patient_name'] else ""
         steps = sess['steps']
 
-        # Create status indicators
-        status_icons = []
+        # Create detailed status information
+        status_parts = []
         if steps.get('frames_extracted'):
-            status_icons.append('📷')
-        if steps.get('ocr_completed'):
-            status_icons.append('🔍')
-        if steps.get('analysis_completed'):
-            status_icons.append('📊')
-        if steps.get('report_generated'):
-            status_icons.append('📄')
+            status_parts.append('✓ Frames')
+        else:
+            status_parts.append('○ Frames')
 
-        status_str = ' '.join(status_icons) if status_icons else '⏳'
+        if steps.get('ocr_completed'):
+            status_parts.append('✓ OCR')
+        else:
+            status_parts.append('○ OCR')
+
+        if steps.get('analysis_completed'):
+            status_parts.append('✓ Analysis')
+        else:
+            status_parts.append('○ Analysis')
+
+        if steps.get('report_generated'):
+            status_parts.append('✓ Report')
+        else:
+            status_parts.append('○ Report')
+
+        status_str = ' | '.join(status_parts)
 
         click.echo(f"{sess['id']}{patient_info}")
         click.echo(f"  Status: {status_str}")
