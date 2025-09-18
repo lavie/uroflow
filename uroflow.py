@@ -34,11 +34,10 @@ NORMAL_VOLUME_MIN = 150.0  # ml - minimum normal voided volume
 NORMAL_VOLUME_MAX = 500.0  # ml - maximum normal voided volume
 BORDERLINE_QMAX = 10.0  # ml/s - borderline peak flow threshold
 
-# Smoothing parameters
-# Configure smoothing in seconds for clarity (converted to points based on 2 fps sampling)
-SMOOTHING_SECONDS = float(os.getenv('UROFLOW_SMOOTHING_SECONDS', '8.0'))  # Default 8 seconds
+# Smoothing parameters (defaults - can be overridden by CLI options)
+SMOOTHING_SECONDS = 8.0  # Default 8 seconds
 SMOOTHING_WINDOW_SIZE = int(SMOOTHING_SECONDS * 2)  # Convert to points at 2 fps
-MIN_SUSTAINED_DURATION = float(os.getenv('UROFLOW_MIN_SUSTAINED_DURATION', '2.0'))  # 2-second rule for Qmax
+MIN_SUSTAINED_DURATION = 2.0  # 2-second rule for Qmax
 
 # OpenAI API configuration
 VISION_MODEL = "gpt-4o"
@@ -299,7 +298,7 @@ def validate_and_aggregate_results(raw_results, discarded_reasons):
 
     return aggregated_results, discarded_count
 
-def process_all_frames(session_path=None, output_csv='weight_data.csv'):
+def process_all_frames(session_path=None, output_csv='weight_data.csv', max_concurrent=None, max_per_second=None):
     """Process all frame images and extract weights using async OCR"""
     
     # Check if API key is set
@@ -327,11 +326,17 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv'):
 
     click.echo(f"Found {len(frame_files)} frames to process...")
 
+    # Use provided parameters or fall back to defaults from environment
+    if max_concurrent is None:
+        max_concurrent = get_max_concurrent()
+    if max_per_second is None:
+        max_per_second = get_max_per_second()
+
     # Process frames asynchronously
     async def run_async_processing():
         processor = AsyncOCRProcessor(
             api_key=api_key,
-            max_concurrent=get_max_concurrent()
+            max_concurrent=max_concurrent
         )
 
         # Process with progress bar
@@ -345,7 +350,7 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv'):
             results = await processor.process_all_frames_with_progress(
                 frame_files,
                 progress_callback=update_progress,
-                max_per_second=get_max_per_second()
+                max_per_second=max_per_second
             )
 
         return results
@@ -672,7 +677,9 @@ def cli():
 @click.option('--session', help='Session ID or path to use')
 @click.option('--patient-name', help='Patient name for new session')
 @click.option('--force', is_flag=True, help='Force re-processing, ignore cached OCR data')
-def read(output_csv, session, patient_name, force):
+@click.option('--max-concurrent', default=10, help='Maximum concurrent OCR API calls (default: 10)')
+@click.option('--max-per-second', default=5.0, help='Maximum OCR requests per second (default: 5)')
+def read(output_csv, session, patient_name, force, max_concurrent, max_per_second):
     """Process frame images and extract weight readings using OpenAI Vision API"""
     session_mgr = SessionManager()
 
@@ -702,7 +709,7 @@ def read(output_csv, session, patient_name, force):
         click.echo(click.style("✓ OCR already completed for this session, skipping... (use --force to re-process)", fg='green'))
         csv_file = session_path / output_csv
     else:
-        csv_file = process_all_frames(session_path, output_csv)
+        csv_file = process_all_frames(session_path, output_csv, max_concurrent=max_concurrent, max_per_second=max_per_second)
 
     if csv_file:
         click.echo("\nRunning analysis on the extracted data...")
@@ -712,15 +719,18 @@ def read(output_csv, session, patient_name, force):
 @click.option('--csv-file', help='CSV file to analyze (default: latest session)')
 @click.option('--plot/--no-plot', default=True, help='Generate visualization chart')
 @click.option('--session', help='Session ID to analyze')
-@click.option('--smoothing', type=float, help='Smoothing window in seconds (default: 6.0)')
-def analyze(csv_file, plot, session, smoothing):
+@click.option('--smoothing', type=float, help='Smoothing window in seconds (default: 8.0)')
+@click.option('--min-sustained', type=float, default=2.0, help='Minimum duration for Qmax calculation (default: 2.0 seconds)')
+def analyze(csv_file, plot, session, smoothing, min_sustained):
     """Analyze existing CSV data and display uroflowmetry metrics"""
-    # Override smoothing if specified
+    # Override global settings if specified
+    global SMOOTHING_WINDOW_SIZE, SMOOTHING_SECONDS, MIN_SUSTAINED_DURATION
     if smoothing:
-        global SMOOTHING_WINDOW_SIZE, SMOOTHING_SECONDS
         SMOOTHING_SECONDS = smoothing
         SMOOTHING_WINDOW_SIZE = int(smoothing * 2)  # Convert to points at 2 fps
         click.echo(f"Using {smoothing}-second smoothing window ({SMOOTHING_WINDOW_SIZE} points)")
+
+    MIN_SUSTAINED_DURATION = min_sustained
 
     if csv_file:
         # Direct file path provided
@@ -860,8 +870,16 @@ def report(session):
 @click.option('--patient-name', prompt='Patient name (optional)', default='', help='Patient name for the session')
 @click.option('--fps', default=2, help='Frames per second to extract')
 @click.option('--force', is_flag=True, help='Force re-processing, ignore all cached data')
-def process(video_path, patient_name, fps, force):
+@click.option('--max-concurrent', default=10, help='Maximum concurrent OCR API calls (default: 10)')
+@click.option('--max-per-second', default=5.0, help='Maximum OCR requests per second (default: 5)')
+@click.option('--smoothing', type=float, default=8.0, help='Smoothing window in seconds (default: 8.0)')
+def process(video_path, patient_name, fps, force, max_concurrent, max_per_second, smoothing):
     """Process a video file from start to finish (frames -> OCR -> analysis -> report)"""
+    # Override global settings with CLI options
+    global SMOOTHING_WINDOW_SIZE, SMOOTHING_SECONDS
+    SMOOTHING_SECONDS = smoothing
+    SMOOTHING_WINDOW_SIZE = int(smoothing * 2)  # Convert to points at 2 fps
+
     session_mgr = SessionManager()
     video_path = Path(video_path).resolve()
 
@@ -929,7 +947,7 @@ def process(video_path, patient_name, fps, force):
     # Step 2: Run OCR if needed
     if force or session_mgr.should_run_ocr(session_path):
         click.echo("\n🔍 Processing frames with OCR...")
-        csv_file = process_all_frames(session_path)
+        csv_file = process_all_frames(session_path, max_concurrent=max_concurrent, max_per_second=max_per_second)
         if not csv_file:
             click.echo(click.style("Error during OCR processing", fg='red'))
             return

@@ -119,14 +119,11 @@ All data is organized in sessions under `~/.uroflow/sessions/`:
 ./uroflow.py process input.mov --fps 3  # Custom frame rate
 ./uroflow.py process input.mov --force  # Force re-processing, ignore all cached data
 
-# With custom concurrency settings (for rate limit management)
-OCR_MAX_CONCURRENT=5 ./uroflow.py process input.mov  # Limit to 5 concurrent OCR calls
-OCR_MAX_PER_SECOND=2 ./uroflow.py process input.mov  # Limit to 2 requests per second
+# With custom OCR concurrency settings (for rate limit management)
+./uroflow.py process input.mov --max-concurrent 5 --max-per-second 2
 
 # With custom smoothing window (for cleaner flow curves)
-./uroflow.py analyze --smoothing 8  # Use 8-second smoothing window
-./uroflow.py plot --smoothing 10    # Use 10-second smoothing for very smooth curves
-UROFLOW_SMOOTHING_SECONDS=8 ./uroflow.py analyze  # Set via environment variable
+./uroflow.py process input.mov --smoothing 10  # Use 10-second smoothing window
 ```
 
 #### Manual Step-by-Step (if needed)
@@ -134,12 +131,15 @@ UROFLOW_SMOOTHING_SECONDS=8 ./uroflow.py analyze  # Set via environment variable
 # 1. Run OCR on existing frames
 ./uroflow.py read --session latest
 ./uroflow.py read --force  # Force re-run OCR, ignore cached results
+./uroflow.py read --max-concurrent 5 --max-per-second 2  # Custom OCR concurrency
 
 # 2. Analyze data
 ./uroflow.py analyze --session latest
+./uroflow.py analyze --smoothing 6.0 --min-sustained 1.5  # Custom analysis parameters
 
 # 3. Generate chart
 ./uroflow.py plot --session latest
+./uroflow.py plot --smoothing 10.0  # Custom smoothing for chart
 
 # 4. Generate PDF report
 ./uroflow.py report --session latest
@@ -184,25 +184,39 @@ Below is an example chart generated from healthy male uroflowmetry data:
 - Flow Time: 27.5 seconds
 - Classic bell-shaped curve indicating normal voiding pattern
 
-## Smoothing Configuration
+## Configuration Options
 
+### Smoothing Parameters
 The tool applies configurable smoothing to reduce measurement noise from frame-by-frame OCR:
 
 - **Default**: 8-second moving average window (optimal for most cases)
 - **Light smoothing** (5-6 seconds): Preserves more detail, slightly noisier
 - **Heavy smoothing** (10+ seconds): Very smooth curves, may reduce peak values
 
-Configure smoothing:
 ```bash
-# Via CLI parameter
-./uroflow.py analyze --smoothing 6.0
-./uroflow.py plot --smoothing 10.0
-
-# Via environment variable
-export UROFLOW_SMOOTHING_SECONDS=8.0
+# Use --smoothing parameter with any command that analyzes data
+./uroflow.py process video.mov --smoothing 6.0
+./uroflow.py analyze --smoothing 10.0
+./uroflow.py plot --smoothing 5.0
 ```
 
-The 2-second sustained rule for Qmax ensures peak measurements represent sustained flow, not momentary spikes.
+The 2-second sustained rule for Qmax ensures peak measurements represent sustained flow, not momentary spikes. This can also be configured:
+
+```bash
+./uroflow.py analyze --min-sustained 1.5  # Require 1.5 seconds sustained flow for Qmax
+```
+
+### OCR Concurrency Settings
+Control API rate limits and processing speed:
+
+```bash
+# Adjust concurrent OCR processing
+./uroflow.py process video.mov --max-concurrent 5 --max-per-second 2
+./uroflow.py read --max-concurrent 10 --max-per-second 5
+```
+
+- `--max-concurrent`: Maximum simultaneous OCR API calls (default: 10)
+- `--max-per-second`: Maximum requests per second (default: 5)
 
 ## Note
 

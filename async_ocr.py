@@ -183,7 +183,7 @@ class AsyncOCRProcessor:
         return results
 
 
-# Utility functions for configuration
+# Utility functions for configuration (fallback to env vars for backwards compatibility)
 def get_max_concurrent() -> int:
     """Get max concurrent setting from environment or default"""
     return int(os.getenv('OCR_MAX_CONCURRENT', '10'))
