@@ -4,12 +4,12 @@ A simple system for extracting uroflow measurements from video recordings of a d
 
 ## Overview
 
-This project enables uroflowmetry testing using commonly available equipment:
+This project enables DIY uroflowmetry testing using commonly available equipment:
 - A digital scale to measure collected urine weight
 - A camera/phone to record the scale display
 - OpenAI's Vision API to extract weight readings from video frames
 
-Uroflowmetry measures urine flow rate over time to assess bladder and urethral function, helping diagnose conditions like BPH, strictures, and bladder outlet obstruction.
+The tool provides objective flow measurements and visualization without clinical interpretation, suitable for personal tracking or sharing with healthcare providers.
 
 ## Workflow
 
@@ -20,11 +20,12 @@ Uroflowmetry measures urine flow rate over time to assess bladder and urethral f
 
 ## Key Measurements
 
-From the weight-over-time data, you can derive:
-- **Peak flow rate (Qmax)**: Maximum ml/s achieved
-- **Average flow rate (Qave)**: Mean flow throughout voiding  
+The tool calculates and reports:
+- **Peak flow rate (Qmax)**: Maximum ml/s achieved (using 2-second sustained rule)
+- **Average flow rate (Qave)**: Mean flow throughout voiding
 - **Voided volume**: Total amount in ml
-- **Flow curve shape**: Diagnostic patterns
+- **Time metrics**: Time to start, time to peak, flow time, total time
+- **Flow curves**: Both raw and smoothed visualization
 
 ## Setup
 
@@ -119,35 +120,39 @@ UROFLOW_SMOOTHING_SECONDS=8 ./uroflow.py analyze  # Set via environment variable
 
 ## Output
 
+Each session generates:
 - `weight_data.csv`: Time-series weight measurements with frame numbers
-- `uroflow_chart.png`: Comprehensive visualization chart showing:
+- `uroflow_chart.png`: Clean visualization chart showing:
   - Cumulative volume over time (blue line)
-  - Flow rate over time (purple line)
+  - Raw flow rate over time (dotted line)
+  - Smoothed flow rate over time (solid purple line)
   - Peak flow (Qmax) marker with annotation
-  - Average flow rate line
-  - Key metrics and clinical interpretation
-  - Reference values for comparison
-- `report.pdf`: Professional medical report including:
-  - Patient information and test date
+  - Average flow rate reference line
+- `report.pdf`: Professional PDF report including:
+  - Patient information (if provided) and test date
   - Embedded flow chart
-  - Metrics table with normal ranges
-  - Clinical interpretation notes
-  - Color-coded status indicators
+  - Comprehensive metrics table
+  - Smoothing methodology note
 
 ## Smoothing Configuration
 
-The tool uses configurable smoothing to reduce noise in flow measurements while preserving clinically relevant patterns:
+The tool applies configurable smoothing to reduce measurement noise from frame-by-frame OCR:
 
-- **Default**: 8-second moving average window (optimal balance)
-- **Light smoothing** (5 seconds): Less smooth, preserves more detail
-- **Medium smoothing** (6 seconds): Moderate smoothing
-- **Heavy smoothing** (10 seconds): Very smooth curves, may lose fine details
+- **Default**: 8-second moving average window (optimal for most cases)
+- **Light smoothing** (5-6 seconds): Preserves more detail, slightly noisier
+- **Heavy smoothing** (10+ seconds): Very smooth curves, may reduce peak values
 
-Configure via:
-- CLI parameter: `--smoothing 8.0`
-- Environment variable: `UROFLOW_SMOOTHING_SECONDS=8.0`
+Configure smoothing:
+```bash
+# Via CLI parameter
+./uroflow.py analyze --smoothing 6.0
+./uroflow.py plot --smoothing 10.0
 
-The 2-second sustained rule for Qmax is applied regardless of smoothing level.
+# Via environment variable
+export UROFLOW_SMOOTHING_SECONDS=8.0
+```
+
+The 2-second sustained rule for Qmax ensures peak measurements represent sustained flow, not momentary spikes.
 
 ## Note
 
@@ -158,12 +163,14 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 ### Current Features
 ✅ Frame extraction from video (ffmpeg)
 ✅ OCR weight reading via OpenAI Vision API
-✅ Flow metrics calculation and analysis
-✅ Visualization charts with clinical interpretation
+✅ Flow metrics calculation with smoothing
+✅ Dual-curve visualization (raw + smoothed)
 ✅ CSV data export
 ✅ Session-based data management in `~/.uroflow/sessions/`
 ✅ Smart caching (skip completed steps)
 ✅ One-command processing from video to analysis
+✅ Professional PDF reports
+✅ Configurable smoothing parameters
 
 ### Planned Enhancements
 
@@ -175,14 +182,14 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
   - ✅ Progress tracking with status messages
   - ✅ Session management with patient names
 
-#### 2. PDF Report Generation
-- **Goal**: Professional A4 PDF report with complete analysis
+#### 2. PDF Report Generation ✅ COMPLETED
+- **Implemented**: Professional A4 PDF reports
 - **Features**:
   - Single-page comprehensive report layout
-  - Include test metadata (date/time, optional patient identifier)
-  - Embed visualization chart
-  - Clinical metrics summary
-  - Export for medical records
+  - Test metadata (date/time, optional patient identifier)
+  - Embedded visualization chart
+  - Complete metrics table
+  - Ready for personal records or healthcare provider sharing
 
 #### 3. Smart Data Management ✅ COMPLETED
 - **Implemented**: Filesystem-based session management
@@ -246,29 +253,32 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 3. ✅ Extract frames if not cached (validates video hash)
 4. ✅ Run OCR if CSV doesn't exist
 5. ✅ Generate analysis and visualization chart
-6. ⏳ Create PDF report (Phase 2 - pending)
+6. ✅ Create PDF report with all metrics
 7. ✅ All intermediate files preserved for re-analysis
 
-### Next Steps
+### Completed Enhancements
 
-**Performance Optimization: Concurrent OCR Processing** ✅ IMPLEMENTED
-- ✅ Uses OpenAI's native `AsyncOpenAI` client for parallel processing
-- ✅ Processes up to 10 frames concurrently (configurable)
-- ✅ Built-in retry logic and exponential backoff (handled by OpenAI client)
-- ✅ Frame validation occurs after all OCR completes
-- ✅ Achieved speedup: 4-5x for OCR phase
-- ✅ Configurable via environment variables:
-  - `OCR_MAX_CONCURRENT`: Max concurrent API calls (default: 10)
-  - `OCR_MAX_PER_SECOND`: Max requests per second (default: 5)
+**✅ Performance Optimization: Concurrent OCR Processing**
+- Uses OpenAI's native `AsyncOpenAI` client for parallel processing
+- Processes up to 10 frames concurrently (configurable)
+- Built-in retry logic and exponential backoff
+- Achieved speedup: 4-5x for OCR phase
 
-**Phase 2: PDF Report Generation** ✅ COMPLETED
-- ✅ ReportLab integration for professional PDF generation
-- ✅ Single-page A4 report with embedded chart and metrics table
-- ✅ Clinical interpretation based on normal ranges
-- ✅ Test date/time and patient name included
-- ✅ Automatic generation during `process` command
-- ✅ Manual generation with `report` command
+**✅ PDF Report Generation**
+- Professional A4 reports with embedded charts
+- Comprehensive metrics table
+- Test date/time and optional patient name
+- Automatic generation during `process` command
 
-**Phase 4: macOS Packaging** (After core features complete)
+**✅ Advanced Smoothing & Analysis**
+- Configurable moving average window (default: 8 seconds)
+- 2-second sustained rule for Qmax calculation
+- Dual visualization of raw and smoothed data
+- Proper alignment of peak markers with smoothed curve
+
+### Future Enhancements
+
+**macOS Packaging**
 - PyInstaller for standalone executable
 - Bundle all dependencies including ffmpeg
+- Simple installer (DMG or Homebrew formula)
