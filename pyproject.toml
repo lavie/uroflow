@@ -10,7 +10,8 @@ requires-python = "^3.13"
 dependencies = [
     "openai (>=1.107.3,<2.0.0)",
     "click (>=8.0.0)",
-    "matplotlib (>=3.10.6,<4.0.0)"
+    "matplotlib (>=3.10.6,<4.0.0)",
+    "aiometer (>=1.0.0,<2.0.0)"
 ]
 
 package-mode = false

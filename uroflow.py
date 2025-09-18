@@ -15,6 +15,8 @@ from pathlib import Path
 from session_manager import SessionManager
 import subprocess
 import shutil
+import asyncio
+from async_ocr import AsyncOCRProcessor, get_max_concurrent, get_max_per_second
 
 # Constants for validation and analysis
 MAX_FLOW_RATE = 20.0  # ml/s - maximum physiologically realistic flow rate
@@ -80,109 +82,67 @@ def extract_weight_from_image(image_path):
         print(f"Error processing {image_path}: {e}")
         return "error"
 
-def process_all_frames(session_path=None, output_csv='weight_data.csv'):
-    """Process all frame images and extract weights"""
-    
-    # Check if API key is set
-    if not os.getenv('OPENAI_API_KEY'):
-        click.echo(click.style("Error: OPENAI_API_KEY environment variable not set!", fg='red'))
-        click.echo("Set it with: export OPENAI_API_KEY='your-api-key-here'")
-        return None
-    
-    # Get all frame images from session directory, sorted by frame number
-    if session_path:
-        frames_dir = Path(session_path) / 'frames'
-        frame_files = sorted(frames_dir.glob('frame_*.jpg'),
-                            key=lambda x: int(x.stem.split('_')[1]))
-        frame_files = [str(f) for f in frame_files]
-        output_csv = str(Path(session_path) / output_csv)
-    else:
-        # Legacy: look in current directory
-        frame_files = sorted(glob.glob('frame_*.jpg'),
-                            key=lambda x: int(x.split('_')[1].split('.')[0]))
-    
-    if not frame_files:
-        click.echo(click.style("No frame files found. Make sure you have frame_*.jpg files in the current directory.", fg='red'))
-        return None
-    
-    click.echo(f"Found {len(frame_files)} frames to process...")
-    
-    # Process all frames and collect raw readings
-    raw_results = []
+def validate_and_aggregate_results(raw_results, discarded_reasons):
+    """Validate and aggregate results after all OCR is complete"""
+    # Sort by frame number since async results arrive out of order
+    raw_results.sort(key=lambda x: x['frame'])
+
+    # Validate sequence
+    validated_results = []
     last_valid_weight = 0.0
     last_valid_time = -1
     discarded_count = 0
-    discarded_reasons = {'decreasing': 0, 'excessive_jump': 0, 'intra_second_diff': 0}
-    
-    with click.progressbar(frame_files, label='Processing frames') as bar:
-        for frame_file in bar:
-            weight = extract_weight_from_image(frame_file)
-            # Extract frame number from filename, not full path
-            filename = Path(frame_file).name
-            frame_number = int(filename.split('_')[1].split('.')[0])
-            # With 2 fps: frame 1,2 = 0s; frame 3,4 = 1s; etc.
-            current_time = (frame_number - 1) * FRAME_INTERVAL  # 0, 0.5, 1, 1.5, 2, ...
-            
-            # Try to convert weight to float for validation
-            try:
-                weight_value = float(weight)
-                
-                # Check for non-decreasing constraint
-                if weight_value < last_valid_weight:
-                    click.echo(f"\n  ⚠️  Frame {frame_file}: Weight decreased from {last_valid_weight} to {weight_value} - discarding")
-                    discarded_count += 1
-                    discarded_reasons['decreasing'] += 1
-                    time.sleep(API_DELAY)
-                    continue
-                
-                # Check for unrealistic jumps (>20g/s flow rate)
-                if last_valid_time >= 0:
-                    time_diff = current_time - last_valid_time
-                    if time_diff > 0:
-                        weight_diff = weight_value - last_valid_weight
-                        flow_rate = weight_diff / time_diff
-                        if flow_rate > MAX_FLOW_RATE:
-                            click.echo(f"\n  ⚠️  Frame {frame_file}: Unrealistic flow rate of {flow_rate:.1f} ml/s - discarding")
-                            discarded_count += 1
-                            discarded_reasons['excessive_jump'] += 1
-                            time.sleep(API_DELAY)
-                            continue
-                
-                # Update last valid weight and time
-                last_valid_weight = weight_value
-                last_valid_time = current_time
-                
-            except (ValueError, TypeError):
-                # Weight is 'unclear' or 'error' - keep it in raw results for tracking
-                pass
-            
-            raw_result = {
-                'frame': frame_number,
-                'time_seconds': current_time,
-                'filename': frame_file,
-                'weight': weight
-            }
-            
-            raw_results.append(raw_result)
-            
-            # Be nice to the API - small delay between requests
-            time.sleep(API_DELAY)
-    
-    # Aggregate readings to 1-second intervals
-    # Group readings by whole second and validate/average them
-    results = []
-    second_groups = {}
-    
+
     for result in raw_results:
+        # Skip error results in validation
+        if result.get('error'):
+            validated_results.append(result)
+            continue
+
+        try:
+            weight_value = float(result['weight'])
+
+            # Check for non-decreasing constraint
+            if weight_value < last_valid_weight:
+                click.echo(f"\n  ⚠️  Frame {result['frame']}: Weight decreased from {last_valid_weight} to {weight_value} - discarding")
+                discarded_count += 1
+                discarded_reasons['decreasing'] += 1
+                continue
+
+            # Check for unrealistic jumps (>20g/s flow rate)
+            if last_valid_time >= 0:
+                time_diff = result['time_seconds'] - last_valid_time
+                if time_diff > 0:
+                    weight_diff = weight_value - last_valid_weight
+                    flow_rate = weight_diff / time_diff
+                    if flow_rate > MAX_FLOW_RATE:
+                        click.echo(f"\n  ⚠️  Frame {result['frame']}: Unrealistic flow rate of {flow_rate:.1f} ml/s - discarding")
+                        discarded_count += 1
+                        discarded_reasons['excessive_jump'] += 1
+                        continue
+
+            # Update last valid weight and time
+            last_valid_weight = weight_value
+            last_valid_time = result['time_seconds']
+            validated_results.append(result)
+
+        except (ValueError, TypeError):
+            # Keep frames with unclear/error readings
+            validated_results.append(result)
+
+    # Aggregate readings to 1-second intervals
+    second_groups = {}
+    for result in validated_results:
         whole_second = int(result['time_seconds'])  # 0.0->0, 0.5->0, 1.0->1, 1.5->1
         if whole_second not in second_groups:
             second_groups[whole_second] = []
         second_groups[whole_second].append(result)
-    
+
+    aggregated_results = []
     for second in sorted(second_groups.keys()):
         readings = second_groups[second]
         valid_weights = []
-        
+
         for reading in readings:
             try:
                 weight = float(reading['weight'])
@@ -190,10 +150,10 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv'):
             except (ValueError, TypeError):
                 # Skip 'unclear' or 'error' readings
                 continue
-        
+
         if not valid_weights:
             # No valid readings for this second, use first reading as-is for tracking
-            results.append({
+            aggregated_results.append({
                 'frame': readings[0]['frame'],
                 'time_seconds': second,
                 'filename': readings[0]['filename'],
@@ -201,7 +161,7 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv'):
             })
         elif len(valid_weights) == 1:
             # Only one valid reading, use it
-            results.append({
+            aggregated_results.append({
                 'frame': readings[0]['frame'],
                 'time_seconds': second,
                 'filename': readings[0]['filename'],
@@ -219,13 +179,80 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv'):
             else:
                 # Readings are consistent, use average
                 avg_weight = sum(valid_weights) / len(valid_weights)
-            
-            results.append({
+
+            aggregated_results.append({
                 'frame': readings[0]['frame'],  # Use first frame of the second
                 'time_seconds': second,
                 'filename': f"averaged_second_{second}",
                 'weight': str(avg_weight)
             })
+
+    return aggregated_results, discarded_count
+
+def process_all_frames(session_path=None, output_csv='weight_data.csv'):
+    """Process all frame images and extract weights using async OCR"""
+    
+    # Check if API key is set
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        click.echo(click.style("Error: OPENAI_API_KEY environment variable not set!", fg='red'))
+        click.echo("Set it with: export OPENAI_API_KEY='your-api-key-here'")
+        return None
+
+    # Get all frame images from session directory
+    if session_path:
+        frames_dir = Path(session_path) / 'frames'
+        frame_files = sorted(frames_dir.glob('frame_*.jpg'),
+                            key=lambda x: int(x.stem.split('_')[1]))
+        frame_files = [str(f) for f in frame_files]
+        output_csv = str(Path(session_path) / output_csv)
+    else:
+        # Legacy: look in current directory
+        frame_files = sorted(glob.glob('frame_*.jpg'),
+                            key=lambda x: int(x.split('_')[1].split('.')[0]))
+
+    if not frame_files:
+        click.echo(click.style("No frame files found.", fg='red'))
+        return None
+
+    click.echo(f"Found {len(frame_files)} frames to process...")
+
+    # Process frames asynchronously
+    async def run_async_processing():
+        processor = AsyncOCRProcessor(
+            api_key=api_key,
+            max_concurrent=get_max_concurrent()
+        )
+
+        # Process with progress bar
+        results = []
+        with click.progressbar(length=len(frame_files), label='Processing frames (async)') as bar:
+            # Define progress callback
+            def update_progress():
+                bar.update(1)
+
+            # Process all frames with progress updates
+            results = await processor.process_all_frames_with_progress(
+                frame_files,
+                progress_callback=update_progress,
+                max_per_second=get_max_per_second()
+            )
+
+        return results
+
+    # Run the async function
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        raw_results = loop.run_until_complete(run_async_processing())
+    finally:
+        loop.close()
+
+    # Initialize tracking for validation
+    discarded_reasons = {'decreasing': 0, 'excessive_jump': 0, 'intra_second_diff': 0}
+
+    # Validate and aggregate results
+    results, discarded_count = validate_and_aggregate_results(raw_results, discarded_reasons)
     
     # Save results to CSV
     with open(output_csv, 'w') as f:
