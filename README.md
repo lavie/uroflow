@@ -11,6 +11,9 @@ This project enables DIY uroflowmetry testing using commonly available equipment
 
 The tool provides objective flow measurements and visualization without clinical interpretation, suitable for personal tracking or sharing with healthcare providers.
 
+![Example Report](example_report.png)
+*Sample PDF report showing flow curve analysis and key metrics*
+
 ## Workflow
 
 1. **Record**: Video the digital scale display during urination
