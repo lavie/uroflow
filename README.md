@@ -18,6 +18,17 @@ The tool provides objective flow measurements and visualization without clinical
 3. **Process**: Run `python main.py` to extract weight readings via OCR
 4. **Analyze**: Use the generated CSV/JSON data to calculate flow parameters
 
+### Video recording
+
+Make sure you record the video with good lighting. Try to capture just the scale reading and not the entire bathroom...
+Avoid holding the camera/phone in your hand - it's best when the video is as stable as possible.
+Here is an example of a frame from a quality video:
+
+<img width="1187" height="778" alt="image" src="https://github.com/user-attachments/assets/e5729216-cb89-4448-9fdf-11f53ac956ca" />
+
+Before processing the video, trim the start/finish. I recommmend saying "start" out loud when you start urinating and then "stop" when you've finished. Then use your phone's video editor to trim the video according to the audio cues.
+
+
 ## Key Measurements
 
 The tool calculates and reports:
