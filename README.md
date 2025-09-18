@@ -270,21 +270,27 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 
 ### Recent Updates
 
+**✅ Standardized CLI Configuration**
+- All settings now use CLI options instead of environment variables
+- Better discoverability with `--help` command
+- Consistent interface across all commands
+- Only `OPENAI_API_KEY` remains as environment variable (for security)
+
 **✅ Performance Optimization: Concurrent OCR Processing**
 - Uses OpenAI's native `AsyncOpenAI` client for parallel processing
-- Processes up to 10 frames concurrently (configurable)
+- Configurable via `--max-concurrent` and `--max-per-second` options
 - Built-in retry logic and exponential backoff
 - Achieved speedup: 4-5x for OCR phase
 
 **✅ PDF Report Generation**
 - Professional A4 reports with embedded charts
-- Comprehensive metrics table
+- Comprehensive metrics table without clinical interpretation
 - Test date/time and optional patient name
 - Automatic generation during `process` command
 
 **✅ Advanced Smoothing & Analysis**
 - Configurable moving average window (default: 8 seconds)
-- 2-second sustained rule for Qmax calculation
+- 2-second sustained rule for Qmax calculation (configurable via `--min-sustained`)
 - Dual visualization of raw and smoothed data
 - Proper alignment of peak markers with smoothed curve
 
