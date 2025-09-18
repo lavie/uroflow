@@ -172,36 +172,9 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 ✅ Professional PDF reports
 ✅ Configurable smoothing parameters
 
-### Planned Enhancements
+### Future Enhancements
 
-#### 1. One-Step Processing ✅ COMPLETED
-- **Implemented**: `uroflow process <video>` command
-- **Features**:
-  - ✅ Integrated frame extraction via ffmpeg subprocess
-  - ✅ Smart caching based on video hash
-  - ✅ Progress tracking with status messages
-  - ✅ Session management with patient names
-
-#### 2. PDF Report Generation ✅ COMPLETED
-- **Implemented**: Professional A4 PDF reports
-- **Features**:
-  - Single-page comprehensive report layout
-  - Test metadata (date/time, optional patient identifier)
-  - Embedded visualization chart
-  - Complete metrics table
-  - Ready for personal records or healthcare provider sharing
-
-#### 3. Smart Data Management ✅ COMPLETED
-- **Implemented**: Filesystem-based session management
-- **Features**:
-  - ✅ Structured sessions: `~/.uroflow/sessions/YYYY-MM-DD-HHMMSS-[patient]/`
-  - ✅ Idempotent processing (checks filesystem for completed steps)
-  - ✅ Smart caching: video hash validation, skip existing frames/OCR
-  - ✅ Multiple tests without collision
-  - ✅ Patient name tagging in session directories
-  - ✅ Filesystem as single source of truth (no redundant metadata)
-
-#### 4. Standalone macOS Application
+#### Standalone macOS Application
 - **Goal**: Easy installation without technical prerequisites
 - **Features**:
   - Bundle Python, dependencies, and ffmpeg
@@ -237,7 +210,7 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
     │   │   └── ...
     │   ├── weight_data.csv        # OCR results
     │   ├── uroflow_chart.png      # Visualization
-    │   └── report.pdf             # (Coming in Phase 2)
+    │   └── report.pdf             # Professional PDF report
     └── latest -> 2024-01-15-143022-John_Doe/  # Symlink to most recent
 ```
 
@@ -245,18 +218,9 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 - Frames extracted: `frames/*.jpg` files exist
 - OCR completed: `weight_data.csv` exists
 - Analysis done: `uroflow_chart.png` exists
-- Report generated: `report.pdf` exists (Phase 2)
+- Report generated: `report.pdf` exists
 
-#### Processing Pipeline (Implemented)
-1. ✅ Accept video file from any location
-2. ✅ Create timestamped session directory with patient name
-3. ✅ Extract frames if not cached (validates video hash)
-4. ✅ Run OCR if CSV doesn't exist
-5. ✅ Generate analysis and visualization chart
-6. ✅ Create PDF report with all metrics
-7. ✅ All intermediate files preserved for re-analysis
-
-### Completed Enhancements
+### Recent Updates
 
 **✅ Performance Optimization: Concurrent OCR Processing**
 - Uses OpenAI's native `AsyncOpenAI` client for parallel processing
@@ -276,9 +240,3 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 - Dual visualization of raw and smoothed data
 - Proper alignment of peak markers with smoothed curve
 
-### Future Enhancements
-
-**macOS Packaging**
-- PyInstaller for standalone executable
-- Bundle all dependencies including ffmpeg
-- Simple installer (DMG or Homebrew formula)
