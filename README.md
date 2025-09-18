@@ -17,15 +17,41 @@ The tool provides objective flow measurements and visualization without clinical
 2. **Process**: Run `./uroflow.py process video.mov` to automatically extract frames, run OCR, and generate analysis
 3. **Review**: Check the generated chart, metrics, and PDF report in `~/.uroflow/sessions/`
 
-### Video recording
+### Video Recording Guidelines
 
-Make sure you record the video with good lighting. Try to capture just the scale reading and not the entire bathroom...
-Avoid holding the camera/phone in your hand - it's best when the video is as stable as possible.
-Here is an example of a frame from a quality video:
+#### Equipment Requirements
+- **Digital scale**: Must have 1g accuracy and display in grams
+  - Kitchen scales work well (typically 1g-5000g range)
+  - Bathroom scales won't work (insufficient resolution)
+- **Container**: Bowl or similar container to collect urine
+- **Camera/phone**: Any device capable of recording video
 
+#### Physical Setup
+1. **Height positioning**: Place the scale on a chair or toilet lid
+   - This brings it to appropriate height for standing urination
+   - Prevents splashing and ensures comfortable positioning
+2. **Container placement**: Center the bowl on the scale
+3. **Zero the scale**: Tare/zero with empty container before recording
+
+![Setup Diagram](camera_position.png)
+*Recommended setup: Scale on toilet lid, bowl centered on scale, camera on tripod focused on display*
+
+#### Recording Tips
+- **Lighting**: Ensure good lighting on the scale display
+- **Camera position**:
+  - Mount or prop your phone/camera to keep it stable (avoid handheld)
+  - Frame the shot to capture just the scale display
+  - Make sure numbers are clearly readable
+- **Audio cues**: Say "start" when beginning and "stop" when finished
+  - This helps with accurate video trimming later
+
+#### Example of Good Video Quality
 <img width="1187" height="778" alt="image" src="https://github.com/user-attachments/assets/e5729216-cb89-4448-9fdf-11f53ac956ca" />
 
-Before processing the video, trim the start/finish. I recommmend saying "start" out loud when you start urinating and then "stop" when you've finished. Then use your phone's video editor to trim the video according to the audio cues.
+#### Post-Recording
+- **Trim the video**: Use your phone's editor to trim from "start" to "stop" audio cues
+- **File format**: Save as .mov or .mp4
+- **Review**: Check that scale readings are clearly visible throughout
 
 
 ## Key Measurements
