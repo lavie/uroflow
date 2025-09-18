@@ -13,10 +13,9 @@ The tool provides objective flow measurements and visualization without clinical
 
 ## Workflow
 
-1. **Record**: Video the digital scale display during urination (save as `input.mov`)
-2. **Extract frames**: Run `./extract_frames.sh` to extract 1 frame per second
-3. **Process**: Run `python main.py` to extract weight readings via OCR
-4. **Analyze**: Use the generated CSV/JSON data to calculate flow parameters
+1. **Record**: Video the digital scale display during urination
+2. **Process**: Run `./uroflow.py process video.mov` to automatically extract frames, run OCR, and generate analysis
+3. **Review**: Check the generated chart, metrics, and PDF report in `~/.uroflow/sessions/`
 
 ### Video recording
 
@@ -40,7 +39,7 @@ The tool calculates and reports:
 
 ## Setup
 
-1. Install dependencies (including matplotlib for visualization):
+1. Install dependencies:
    ```bash
    poetry install --no-root
    ```
@@ -49,8 +48,6 @@ The tool calculates and reports:
    ```bash
    export OPENAI_API_KEY='your-api-key-here'
    ```
-
-3. Place your video as `input.mov` in the project directory
 
 ## Usage
 
@@ -105,18 +102,18 @@ UROFLOW_SMOOTHING_SECONDS=8 ./uroflow.py analyze  # Set via environment variable
 
 #### Manual Step-by-Step (if needed)
 ```bash
-# 1. Extract frames only
-./extract_frames.sh input.mov  # Legacy bash script
-
-# 2. Run OCR on frames
+# 1. Run OCR on existing frames
 ./uroflow.py read --session latest
-./uroflow.py read --force  # Force re-run OCR, delete cached results
+./uroflow.py read --force  # Force re-run OCR, ignore cached results
 
-# 3. Analyze data
+# 2. Analyze data
 ./uroflow.py analyze --session latest
 
-# 4. Generate chart
+# 3. Generate chart
 ./uroflow.py plot --session latest
+
+# 4. Generate PDF report
+./uroflow.py report --session latest
 ```
 
 ### CLI Commands
@@ -194,23 +191,7 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
   - No need for Python/Poetry knowledge
   - Auto-updates for new versions
 
-### Implementation Decisions
-
-#### Technical Choices
-- **PDF Generation**: ReportLab for professional medical-grade report control
-- **Packaging**: PyInstaller for standalone macOS executable (final step)
-- **Data Storage**: Persistent storage in `~/.uroflow/` with session management
-- **Frame Extraction**: Keep intermediate frames for potential re-analysis
-- **Video Processing**: Integrated ffmpeg subprocess calls
-
-#### Feature Specifications
-- **Patient ID**: Optional name field (CLI option or interactive prompt)
-- **Data Retention**: Permanent storage of all test sessions
-- **Report Format**: Single fixed English template, A4 PDF output
-- **Video Support**: MOV format (additional formats as needed)
-- **Frame Rate**: 2 fps extraction (configurable if needed)
-
-#### Data Organization Structure (Implemented)
+### Data Organization
 ```
 ~/.uroflow/
 └── sessions/
