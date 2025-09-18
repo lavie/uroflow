@@ -79,6 +79,7 @@ All data is organized in sessions under `~/.uroflow/sessions/`:
 ```bash
 ./uroflow.py process input.mov --patient-name "John Doe"
 ./uroflow.py process input.mov --fps 3  # Custom frame rate
+./uroflow.py process input.mov --force  # Force re-processing, ignore all cached data
 ```
 
 #### Manual Step-by-Step (if needed)
@@ -88,6 +89,7 @@ All data is organized in sessions under `~/.uroflow/sessions/`:
 
 # 2. Run OCR on frames
 ./uroflow.py read --session latest
+./uroflow.py read --force  # Force re-run OCR, delete cached results
 
 # 3. Analyze data
 ./uroflow.py analyze --session latest
@@ -107,8 +109,7 @@ All data is organized in sessions under `~/.uroflow/sessions/`:
 
 ## Output
 
-- `weight_data.csv`: Time-series weight measurements
-- `weight_data.json`: Detailed frame-by-frame results
+- `weight_data.csv`: Time-series weight measurements with frame numbers
 - `uroflow_chart.png`: Comprehensive visualization chart showing:
   - Cumulative volume over time (blue line)
   - Flow rate over time (purple line)
@@ -128,7 +129,7 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 ✅ OCR weight reading via OpenAI Vision API
 ✅ Flow metrics calculation and analysis
 ✅ Visualization charts with clinical interpretation
-✅ CSV/JSON data export
+✅ CSV data export
 ✅ Session-based data management in `~/.uroflow/sessions/`
 ✅ Smart caching (skip completed steps)
 ✅ One-command processing from video to analysis
@@ -197,7 +198,6 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
     │   │   ├── frame_0001.jpg
     │   │   └── ...
     │   ├── weight_data.csv        # OCR results
-    │   ├── weight_data.json       # Detailed OCR data
     │   ├── uroflow_chart.png      # Visualization
     │   └── report.pdf             # (Coming in Phase 2)
     └── latest -> 2024-01-15-143022-John_Doe/  # Symlink to most recent
@@ -205,7 +205,7 @@ Since 1g of urine ≈ 1ml, weight changes directly correlate to volume. Flow rat
 
 **Session Status Detection (filesystem-based):**
 - Frames extracted: `frames/*.jpg` files exist
-- OCR completed: `weight_data.csv` and `.json` exist
+- OCR completed: `weight_data.csv` exists
 - Analysis done: `uroflow_chart.png` exists
 - Report generated: `report.pdf` exists (Phase 2)
 

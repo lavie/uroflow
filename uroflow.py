@@ -80,7 +80,7 @@ def extract_weight_from_image(image_path):
         print(f"Error processing {image_path}: {e}")
         return "error"
 
-def process_all_frames(session_path=None, output_csv='weight_data.csv', output_json='weight_data.json'):
+def process_all_frames(session_path=None, output_csv='weight_data.csv'):
     """Process all frame images and extract weights"""
     
     # Check if API key is set
@@ -96,7 +96,6 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv', output_j
                             key=lambda x: int(x.stem.split('_')[1]))
         frame_files = [str(f) for f in frame_files]
         output_csv = str(Path(session_path) / output_csv)
-        output_json = str(Path(session_path) / output_json)
     else:
         # Legacy: look in current directory
         frame_files = sorted(glob.glob('frame_*.jpg'),
@@ -233,13 +232,9 @@ def process_all_frames(session_path=None, output_csv='weight_data.csv', output_j
         f.write('time_seconds,frame,filename,weight\n')
         for result in results:
             f.write(f"{result['time_seconds']},{result['frame']},{result['filename']},{result['weight']}\n")
-    
-    # Also save as JSON for more detailed analysis
-    with open(output_json, 'w') as f:
-        json.dump(results, f, indent=2)
-    
+
     click.echo(click.style("\n✓ Processing complete!", fg='green'))
-    click.echo(f"Results saved to {output_csv} and {output_json}")
+    click.echo(f"Results saved to {output_csv}")
     click.echo(f"Processed {len(raw_results)} frames at 2 fps → {len(results)} aggregated seconds")
     click.echo(f"Successfully recorded {len([r for r in results if r['weight'] not in ['error', 'unclear']])} valid seconds")
     if discarded_count > 0:
@@ -591,10 +586,10 @@ def cli():
 
 @cli.command()
 @click.option('--output-csv', default='weight_data.csv', help='Output CSV filename')
-@click.option('--output-json', default='weight_data.json', help='Output JSON filename')
 @click.option('--session', help='Session ID or path to use')
 @click.option('--patient-name', help='Patient name for new session')
-def read(output_csv, output_json, session, patient_name):
+@click.option('--force', is_flag=True, help='Force re-processing, ignore cached OCR data')
+def read(output_csv, session, patient_name, force):
     """Process frame images and extract weight readings using OpenAI Vision API"""
     session_mgr = SessionManager()
 
@@ -611,12 +606,20 @@ def read(output_csv, output_json, session, patient_name):
             session_path = session_mgr.create_session(patient_name)
             click.echo(f"Created new session: {session_path.name}")
 
+    # Force re-processing if requested
+    if force:
+        click.echo("Force mode: Removing existing OCR data...")
+        csv_path = session_path / output_csv
+        if csv_path.exists():
+            csv_path.unlink()
+            click.echo(f"  Removed {csv_path.name}")
+
     # Check if OCR is needed
-    if not session_mgr.should_run_ocr(session_path):
-        click.echo(click.style("✓ OCR already completed for this session, skipping...", fg='green'))
+    if not force and not session_mgr.should_run_ocr(session_path):
+        click.echo(click.style("✓ OCR already completed for this session, skipping... (use --force to re-process)", fg='green'))
         csv_file = session_path / output_csv
     else:
-        csv_file = process_all_frames(session_path, output_csv, output_json)
+        csv_file = process_all_frames(session_path, output_csv)
 
     if csv_file:
         click.echo("\nRunning analysis on the extracted data...")
@@ -725,7 +728,8 @@ def sessions():
 @click.argument('video_path', type=click.Path(exists=True))
 @click.option('--patient-name', prompt='Patient name (optional)', default='', help='Patient name for the session')
 @click.option('--fps', default=2, help='Frames per second to extract')
-def process(video_path, patient_name, fps):
+@click.option('--force', is_flag=True, help='Force re-processing, ignore all cached data')
+def process(video_path, patient_name, fps, force):
     """Process a video file from start to finish (frames -> OCR -> analysis -> report)"""
     session_mgr = SessionManager()
     video_path = Path(video_path).resolve()
@@ -737,8 +741,28 @@ def process(video_path, patient_name, fps):
     session_path = session_mgr.get_or_create_session_from_video(video_path, patient_name)
     click.echo(f"\nUsing session: {session_path.name}")
 
+    # Force re-processing if requested
+    if force:
+        click.echo("Force mode: Cleaning existing data...")
+        # Remove frames
+        frames_dir = session_path / 'frames'
+        if frames_dir.exists():
+            for frame in frames_dir.glob('frame_*.jpg'):
+                frame.unlink()
+            click.echo(f"  Removed frame images")
+        # Remove OCR data
+        csv_path = session_path / 'weight_data.csv'
+        if csv_path.exists():
+            csv_path.unlink()
+            click.echo(f"  Removed weight_data.csv")
+        # Remove chart
+        chart_path = session_path / 'uroflow_chart.png'
+        if chart_path.exists():
+            chart_path.unlink()
+            click.echo(f"  Removed chart")
+
     # Step 1: Extract frames if needed
-    if session_mgr.should_extract_frames(session_path, video_path):
+    if force or session_mgr.should_extract_frames(session_path, video_path):
         click.echo("\n📷 Extracting frames from video...")
         frames_dir = session_path / 'frames'
 
@@ -772,7 +796,7 @@ def process(video_path, patient_name, fps):
         click.echo(click.style("✓ Frames already extracted, using cached frames", fg='green'))
 
     # Step 2: Run OCR if needed
-    if session_mgr.should_run_ocr(session_path):
+    if force or session_mgr.should_run_ocr(session_path):
         click.echo("\n🔍 Processing frames with OCR...")
         csv_file = process_all_frames(session_path)
         if not csv_file:

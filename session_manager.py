@@ -174,12 +174,10 @@ class SessionManager:
     def should_run_ocr(self, session_path: Path) -> bool:
         """Check if OCR processing is needed based on filesystem state"""
         csv_path = session_path / 'weight_data.csv'
-        json_path = session_path / 'weight_data.json'
 
-        # Check if both OCR outputs exist and have content
-        if csv_path.exists() and json_path.exists():
-            if csv_path.stat().st_size > 0 and json_path.stat().st_size > 0:
-                return False
+        # Check if OCR output exists and has content
+        if csv_path.exists() and csv_path.stat().st_size > 0:
+            return False
 
         return True
 
@@ -203,9 +201,7 @@ class SessionManager:
     def _has_ocr_data(self, session_path: Path) -> bool:
         """Check if session has OCR data"""
         csv_path = session_path / 'weight_data.csv'
-        json_path = session_path / 'weight_data.json'
-        return (csv_path.exists() and csv_path.stat().st_size > 0 and
-                json_path.exists() and json_path.stat().st_size > 0)
+        return csv_path.exists() and csv_path.stat().st_size > 0
 
     def _has_chart(self, session_path: Path) -> bool:
         """Check if session has generated chart"""
@@ -249,7 +245,6 @@ class SessionManager:
         # Copy important files
         files_to_export = [
             'weight_data.csv',
-            'weight_data.json',
             'uroflow_chart.png',
             'report.pdf',
             'metadata.json'
