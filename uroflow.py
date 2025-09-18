@@ -9,7 +9,6 @@ import csv
 import click
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.gridspec import GridSpec
 import numpy as np
 from pathlib import Path
 from session_manager import SessionManager
@@ -455,14 +454,8 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
     peak_flow_time = flow_times[peak_flow_index] if flow_times and peak_flow_index < len(flow_times) else 0
 
     # Create figure with landscape A4 dimensions (11.7 x 8.3 inches)
-    fig = plt.figure(figsize=(11.7, 8.3))
+    fig, ax1 = plt.subplots(figsize=(11.7, 8.3))
     fig.suptitle('Uroflowmetry Analysis Report', fontsize=16, fontweight='bold')
-
-    # Create gridspec for better layout control
-    gs = GridSpec(2, 2, figure=fig, height_ratios=[3, 1], width_ratios=[3, 1])
-
-    # Main plot - dual axis
-    ax1 = fig.add_subplot(gs[0, :])
 
     # Plot cumulative volume on primary y-axis
     color1 = '#2E86AB'  # Nice blue
@@ -518,74 +511,7 @@ def create_uroflow_plot(csv_file='weight_data.csv', output_file='uroflow_chart.p
     # Add title to main plot
     ax1.set_title('Flow Rate and Volume Over Time', fontsize=14, pad=20)
 
-    # Statistics box
-    stats_ax = fig.add_subplot(gs[1, 0])
-    stats_ax.axis('off')
-
-    # Calculate metrics
-    total_volume = volumes[-1] if volumes else 0
-    total_time = times[-1] if times else 0
-
-    # Create stats text
-    stats_text = (
-        f"Key Metrics (Smoothed):\n\n"
-        f"Total Volume: {total_volume:.1f} ml\n"
-        f"Peak Flow Rate (Qmax)*: {peak_flow:.1f} ml/s\n"
-        f"Average Flow Rate: {avg_flow:.1f} ml/s\n"
-        f"Time to Peak: {peak_flow_time:.1f} s\n"
-        f"Total Time: {total_time:.1f} s\n\n"
-        f"Reference Values (Adult Male):\n"
-        f"Normal Qmax: >15 ml/s\n"
-        f"Normal Volume: 150-500 ml\n\n"
-        f"*2-sec sustained rule applied"
-    )
-
-    stats_ax.text(0.05, 0.95, stats_text, transform=stats_ax.transAxes,
-                 fontsize=10, verticalalignment='top',
-                 bbox=dict(boxstyle='round,pad=0.5', facecolor='#F5F5F5', edgecolor='gray', alpha=0.8))
-
-    # Clinical interpretation box
-    interp_ax = fig.add_subplot(gs[1, 1])
-    interp_ax.axis('off')
-
-    # Determine interpretation
-    interpretations = []
-    colors = []
-
-    if peak_flow < BORDERLINE_QMAX:
-        interpretations.append("⚠ Low peak flow")
-        colors.append('red')
-    elif peak_flow < NORMAL_QMAX_MIN:
-        interpretations.append("⚠ Borderline peak flow")
-        colors.append('orange')
-    else:
-        interpretations.append("✓ Normal peak flow")
-        colors.append('green')
-
-    if total_volume < NORMAL_VOLUME_MIN:
-        interpretations.append("⚠ Low volume")
-        colors.append('orange')
-    elif total_volume > NORMAL_VOLUME_MAX:
-        interpretations.append("⚠ High volume")
-        colors.append('orange')
-    else:
-        interpretations.append("✓ Normal volume")
-        colors.append('green')
-
-    if avg_flow < NORMAL_QAVE_MIN:
-        interpretations.append("⚠ Low average flow")
-        colors.append('red')
-    else:
-        interpretations.append("✓ Normal average flow")
-        colors.append('green')
-
-    # Create interpretation text with colors
-    interp_text = "Clinical Notes:\n\n"
-    for i, (text, color) in enumerate(zip(interpretations, colors)):
-        interp_ax.text(0.05, 0.75 - i*0.15, text, transform=interp_ax.transAxes,
-                      fontsize=10, color=color, fontweight='bold')
-
-    # Adjust layout and save
+    # Adjust layout and save (no stats or interpretation boxes)
     plt.tight_layout()
     plt.savefig(output_file, dpi=150, bbox_inches='tight', facecolor='white')
 
@@ -680,51 +606,21 @@ def analyze_uroflow_data(csv_file='weight_data.csv', create_plot=False, generate
     
     flow_time = times[flow_end_index] - times[start_index]
     
-    # Display results
+    # Display results (simplified - no clinical interpretation)
     click.echo("\n" + "="*60)
-    click.echo(click.style("UROFLOWMETRY ANALYSIS", fg='cyan', bold=True))
+    click.echo(click.style("UROFLOWMETRY ANALYSIS RESULTS", fg='cyan', bold=True))
     click.echo("="*60)
-    
-    click.echo("\n📊 KEY METRICS:")
+
+    click.echo("\n📊 MEASUREMENTS:")
     click.echo("-" * 40)
-    click.echo(f"Voided Volume:         {voided_volume:.1f} ml")
-    click.echo(f"Peak Flow Rate (Qmax): {peak_flow_rate:.1f} ml/s")
+    click.echo(f"Voided Volume:           {voided_volume:.1f} ml")
+    click.echo(f"Peak Flow Rate (Qmax):   {peak_flow_rate:.1f} ml/s")
     click.echo(f"Average Flow Rate (Qave): {average_flow_rate:.1f} ml/s")
-    click.echo(f"Time to Start:         {time_to_start:.1f} seconds")
-    click.echo(f"Time to Peak:          {time_to_peak:.1f} seconds")
-    click.echo(f"Flow Time:             {flow_time:.1f} seconds")
-    click.echo(f"Voiding Time:          {times[-1]:.1f} seconds (total)")
-    
-    # Clinical interpretation hints
-    click.echo("\n📋 REFERENCE VALUES (adult male):")
-    click.echo("-" * 40)
-    click.echo(f"Normal Qmax:           > {NORMAL_QMAX_MIN:.0f} ml/s")
-    click.echo(f"Normal Qave:           > {NORMAL_QAVE_MIN:.0f} ml/s")
-    click.echo(f"Normal volume:         {NORMAL_VOLUME_MIN:.0f}-{NORMAL_VOLUME_MAX:.0f} ml")
-    
-    # Simple interpretation
-    click.echo("\n💡 OBSERVATIONS:")
-    click.echo("-" * 40)
-    
-    if peak_flow_rate < BORDERLINE_QMAX:
-        click.echo(click.style("⚠️  Peak flow rate is below normal range", fg='red'))
-    elif peak_flow_rate < NORMAL_QMAX_MIN:
-        click.echo(click.style("⚠️  Peak flow rate is borderline", fg='yellow'))
-    else:
-        click.echo(click.style("✓ Peak flow rate is within normal range", fg='green'))
-    
-    if voided_volume < NORMAL_VOLUME_MIN:
-        click.echo(click.style("⚠️  Low voided volume - may affect accuracy", fg='yellow'))
-    elif voided_volume > NORMAL_VOLUME_MAX:
-        click.echo(click.style("⚠️  High voided volume", fg='yellow'))
-    else:
-        click.echo(click.style("✓ Voided volume is within normal range", fg='green'))
-    
-    if average_flow_rate < NORMAL_QAVE_MIN:
-        click.echo(click.style("⚠️  Average flow rate is below normal", fg='red'))
-    else:
-        click.echo(click.style("✓ Average flow rate is within normal range", fg='green'))
-    
+    click.echo(f"Time to Start:           {time_to_start:.1f} seconds")
+    click.echo(f"Time to Peak:            {time_to_peak:.1f} seconds")
+    click.echo(f"Flow Time:               {flow_time:.1f} seconds")
+    click.echo(f"Total Time:              {times[-1]:.1f} seconds")
+
     click.echo("\n" + "="*60)
 
     # Prepare metrics dictionary
