@@ -168,6 +168,19 @@ Each session generates:
   - Comprehensive metrics table
   - Smoothing methodology note
 
+### Example Output
+
+Below is an example chart generated from healthy male uroflowmetry data:
+
+![Example Uroflow Chart](example_chart.png)
+
+**Example metrics from this test:**
+- Voided Volume: 643.4 ml
+- Peak Flow Rate (Qmax): 36.1 ml/s (healthy: >15 ml/s)
+- Average Flow Rate (Qave): 20.7 ml/s (healthy: >10 ml/s)
+- Flow Time: 27.5 seconds
+- Classic bell-shaped curve indicating normal voiding pattern
+
 ## Smoothing Configuration
 
 The tool applies configurable smoothing to reduce measurement noise from frame-by-frame OCR:
